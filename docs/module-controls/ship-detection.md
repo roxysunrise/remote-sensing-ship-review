@@ -8,7 +8,7 @@
 - Issue：[#3](https://github.com/roxysunrise/remote-sensing-ship-review/issues/3)；分支：`codex/yolov8-obb-minimal`。
 - 基线：`codex/project-ai-controls`（975db183，开放PR #2），先合入总控，再将本模块PR基线切换main。不要合入已关闭未合并PR #1的职责调整。
 - 实现与验证：本控制文档所在提交包含源码、契约、样例和真实验证记录。
-- 上传：本轮授权提交分支并创建PR，实际远端提交号/PR以GitHub为准；未合并、未部署。不能由“本地通过”推定远端已上传。
+- 上传：实现提交`9e7bc453d4bee14e930bc58e767136a39ae61e7b`已推送并核对远端一致；[PR #4](https://github.com/roxysunrise/remote-sensing-ship-review/pull/4)已创建，base为`codex/project-ai-controls`。本条后续文档提交以分支最新HEAD为准；未合并、未部署。
 - 隔离工作区：`C:/Users/28028/.codex/worktrees/ship-detection-delivery/遥感应用`。原工作区保留；未reset/clean/stash或提交其职责提案。
 
 ## 目标与边界
@@ -64,3 +64,4 @@ RGB/EXIF/像素和参数限制、原图坐标、错误码均以契约为唯一�
 
 - 2026-10-27：控制规则初建时仅导航本地未提交检测实现，未运行或上传该模块；保留此历史边界。
 - 2026-10-27：用户授权按总控上传；隔离交付检测实现并重新验证CPU/GPU、正常/空/错误场景，增加真实JSON样例及验证记录；未改变PR #1的关闭状态，未自动合并或部署。
+- 2026-10-27：实现提交9e7bc45远端核对一致，创建Issue #3和PR #4；PR基线显式依赖#2，上传完成与合并/部署分开记录。
