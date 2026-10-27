@@ -1,0 +1,78 @@
+{
+  "schema_version": "ship-detection/0.1",
+  "created_at": "2026-10-27T12:58:34.249010+00:00",
+  "image": {
+    "file_name": "empty.png",
+    "sha256": "bac8f9274f5572c63ddeb7144f5ced43d07a3fe4b949e2a5c1047e8c3ba1682e",
+    "width": 1024,
+    "height": 1024,
+    "mode": "RGB"
+  },
+  "coordinates": {
+    "unit": "pixel",
+    "origin": "top-left",
+    "x_axis": "right",
+    "y_axis": "down",
+    "polygon_order": "clockwise; start=min(y,x)",
+    "space": "original_image",
+    "clipped": false
+  },
+  "model": {
+    "backend": "ultralytics",
+    "task": "obb",
+    "weights_file": "best.pt",
+    "architecture": "OBBModel",
+    "checkpoint_model": "yolov8l-obb.pt",
+    "checkpoint_ultralytics_version": "8.1.5",
+    "checkpoint_epoch": -1,
+    "weights_sha256": "6508d583f538e858d498335c0fb6efd24c9e5116823eb4152f6d6979193cd26f",
+    "ultralytics_version": "8.4.189",
+    "torch_version": "2.9.1+cu128",
+    "class_names": {
+      "0": "plane",
+      "1": "ship",
+      "2": "storage-tank",
+      "3": "baseball-diamond",
+      "4": "tennis-court",
+      "5": "basketball-court",
+      "6": "ground-track-field",
+      "7": "harbor",
+      "8": "bridge",
+      "9": "large-vehicle",
+      "10": "small-vehicle",
+      "11": "helicopter",
+      "12": "roundabout",
+      "13": "soccer-ball-field",
+      "14": "swimming-pool"
+    },
+    "device": "0",
+    "device_name": "NVIDIA GeForce RTX 5060 Laptop GPU"
+  },
+  "parameters": {
+    "conf": 0.25,
+    "iou": 0.7,
+    "imgsz": 1024,
+    "max_det": 1000,
+    "classes": [
+      1
+    ],
+    "half": false,
+    "augment": false,
+    "tiling": false
+  },
+  "timing_ms": {
+    "model_load": 2098.339600022882,
+    "decode": 71.94579998031259,
+    "predict_call": 66.16899999789894,
+    "total_before_save": 142.14160002302378,
+    "backend": {
+      "preprocess": 5.65669999923557,
+      "inference": 49.478899978566915,
+      "postprocess": 3.1386000337079167
+    },
+    "preview_save": 287.81200002413243
+  },
+  "count": 0,
+  "warnings": [],
+  "detections": []
+}

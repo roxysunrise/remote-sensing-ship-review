@@ -1,0 +1,192 @@
+{
+  "device": "0",
+  "model": {
+    "backend": "ultralytics",
+    "task": "obb",
+    "weights_file": "best.pt",
+    "architecture": "OBBModel",
+    "checkpoint_model": "yolov8l-obb.pt",
+    "checkpoint_ultralytics_version": "8.1.5",
+    "checkpoint_epoch": -1,
+    "weights_sha256": "6508d583f538e858d498335c0fb6efd24c9e5116823eb4152f6d6979193cd26f",
+    "ultralytics_version": "8.4.189",
+    "torch_version": "2.9.1+cu128",
+    "class_names": {
+      "0": "plane",
+      "1": "ship",
+      "2": "storage-tank",
+      "3": "baseball-diamond",
+      "4": "tennis-court",
+      "5": "basketball-court",
+      "6": "ground-track-field",
+      "7": "harbor",
+      "8": "bridge",
+      "9": "large-vehicle",
+      "10": "small-vehicle",
+      "11": "helicopter",
+      "12": "roundabout",
+      "13": "soccer-ball-field",
+      "14": "swimming-pool"
+    },
+    "device": "0",
+    "device_name": "NVIDIA GeForce RTX 5060 Laptop GPU"
+  },
+  "samples": {
+    "dense": {
+      "count": 32,
+      "size": [
+        1024,
+        1024
+      ],
+      "parameters": {
+        "conf": 0.25,
+        "iou": 0.7,
+        "imgsz": 1024,
+        "max_det": 1000,
+        "classes": [
+          1
+        ],
+        "half": false,
+        "augment": false,
+        "tiling": false
+      },
+      "end_to_end_ms": 3848.506100010127,
+      "timing_ms": {
+        "model_load": 2098.339600022882,
+        "decode": 55.23669999092817,
+        "predict_call": 3510.1696000201628,
+        "total_before_save": 3627.550000033807,
+        "backend": {
+          "preprocess": 50.85279996274039,
+          "inference": 47.707000048831105,
+          "postprocess": 139.0726999961771
+        },
+        "preview_save": 218.02700002444908
+      },
+      "annotated_ship_count": 43,
+      "predictions_with_gt_iou_ge_0_5": 25
+    },
+    "small": {
+      "count": 0,
+      "size": [
+        1024,
+        1024
+      ],
+      "parameters": {
+        "conf": 0.25,
+        "iou": 0.7,
+        "imgsz": 1024,
+        "max_det": 1000,
+        "classes": [
+          1
+        ],
+        "half": false,
+        "augment": false,
+        "tiling": false
+      },
+      "end_to_end_ms": 427.23709996789694,
+      "timing_ms": {
+        "model_load": 2098.339600022882,
+        "decode": 72.29979999829084,
+        "predict_call": 66.34009996196255,
+        "total_before_save": 142.872600001283,
+        "backend": {
+          "preprocess": 4.442500008735806,
+          "inference": 47.48989996733144,
+          "postprocess": 3.7358999834395945
+        },
+        "preview_save": 282.54919999744743
+      },
+      "annotated_ship_count": 1,
+      "predictions_with_gt_iou_ge_0_5": 0
+    },
+    "empty": {
+      "count": 0,
+      "size": [
+        1024,
+        1024
+      ],
+      "parameters": {
+        "conf": 0.25,
+        "iou": 0.7,
+        "imgsz": 1024,
+        "max_det": 1000,
+        "classes": [
+          1
+        ],
+        "half": false,
+        "augment": false,
+        "tiling": false
+      },
+      "end_to_end_ms": 431.2758999876678,
+      "timing_ms": {
+        "model_load": 2098.339600022882,
+        "decode": 71.94579998031259,
+        "predict_call": 66.16899999789894,
+        "total_before_save": 142.14160002302378,
+        "backend": {
+          "preprocess": 5.65669999923557,
+          "inference": 49.478899978566915,
+          "postprocess": 3.1386000337079167
+        },
+        "preview_save": 287.81200002413243
+      }
+    },
+    "dense_nonsquare": {
+      "count": 35,
+      "size": [
+        1024,
+        512
+      ],
+      "parameters": {
+        "conf": 0.25,
+        "iou": 0.7,
+        "imgsz": 640,
+        "max_det": 1000,
+        "classes": [
+          1
+        ],
+        "half": false,
+        "augment": false,
+        "tiling": false
+      },
+      "end_to_end_ms": 301.52460001409054,
+      "timing_ms": {
+        "model_load": 2098.339600022882,
+        "decode": 36.05349996360019,
+        "predict_call": 137.17950001591817,
+        "total_before_save": 179.19049999909475,
+        "backend": {
+          "preprocess": 0.9422999573871493,
+          "inference": 123.2315000379458,
+          "postprocess": 9.207899973262101
+        },
+        "preview_save": 112.47640004148707
+      },
+      "predictions_with_gt_iou_ge_0_5": 23
+    }
+  },
+  "dense_warm_predict_ms": 70.14619995607063,
+  "status": "PASS",
+  "cpu": {
+    "count": 32,
+    "timing_ms": {
+      "model_load": 2281.020399997942,
+      "decode": 29.735299991443753,
+      "predict_call": 4992.039300035685,
+      "total_before_save": 5100.983400014229,
+      "backend": {
+        "preprocess": 3.9558999706059694,
+        "inference": 2344.2328999517485,
+        "postprocess": 4.603700013831258
+      },
+      "preview_save": 199.16750001721084
+    }
+  },
+  "scope": "Pipeline and geometry checks only; not accuracy acceptance",
+  "date_asia_shanghai": "2026-10-27",
+  "code_sha256": {
+    "algorithm\\ship_detector.py": "c8ad5b0877163efedaef9217e207e1b56643ab5cc739f8f9e621e2044c664a79",
+    "scripts\\verify_detection_smoke.py": "9d557d663f275011248cdc4531d8d360b9f1e0d658b811f08caab58bef9756e7"
+  }
+}

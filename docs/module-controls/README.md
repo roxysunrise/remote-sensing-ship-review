@@ -4,7 +4,7 @@
 
 | 模块 ID | 负责人 | 控制文档 | 当前记录 |
 |---|---|---|---|
-| ship-detection | A | [单图船舶检测](ship-detection.md) | 本地存在未提交实现；本次仅建控制记录，未复核推理证据、未上传实现 |
+| ship-detection | A | [单图船舶检测](ship-detection.md) | 单图Python/CLI可独立接入，CPU/GPU重新验证；Issue #3，codex/yolov8-obb-minimal；PR依赖总控PR #2，上传状态见控制文档 |
 
 后续按实际工作登记大图检测、Worker、编辑组件、AI辅助、上传存储等模块，不把尚未开始的模块登记为完成。职责按实际已确认协议填写；不得用本索引改变 B 方分工。
 
