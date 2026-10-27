@@ -2,7 +2,11 @@
 
 面向静态港口遥感影像，实现可靠上传、船舶旋转框检测、大图浏览、人工与 AI 辅助复核、区域统计、版本保存和导出。
 
-当前状态：协作仓库初始化；尚未实现应用、训练模型或部署服务。技术栈尚未确定。
+当前状态：已实现本地YOLOv8l-OBB单图推理最小模块，复用已有权重，CPU/GPU已实测；完整应用、服务部署及整体技术栈尚未完成或确定。
+
+## 本地检测模块
+
+启动、依赖、样例与限制见[算法模块说明](algorithm/README.md)，输出见[检测契约v0.1提案](contracts/ship-detection-v0.1.md)，交付状态见[模块控制文档](docs/module-controls/ship-detection.md)。准备本地权重、环境与样例后运行 `scripts/run-detection.ps1 -Image datasets/smoke/dense.png -Device 0`，CPU用 `-Device cpu`。权重、影像、数据集与虚拟环境不入Git。
 
 ## 协作入口
 

@@ -2,28 +2,32 @@
 
 ## 身份与状态
 
-- 模块 ID：ship-detection；主责：A；实际实现会话未在本记录中确认。
+- 模块ID：ship-detection；A负责；执行者：当前用户授权的Codex检测实现/交付会话。
 - 更新日期：2026-10-27（Asia/Shanghai）。
-- 状态：本地开发中；以下来自本次文件读取，不是重新运行验收。
-- 本次控制规则从 main 单独提交；检测实现仍位于原工作目录的未提交文件中。干净克隆本控制文档所在提交时，尚不能据此直接运行检测。
-- 已上传/合并/部署：本次不上传检测实现；未确认该模块已有其他远端提交或部署。后续接手者必须重新检查。
+- 状态：可独立调用/待应用接入，未完成双方接口确认或整体业务验收。
+- Issue：[#3](https://github.com/roxysunrise/remote-sensing-ship-review/issues/3)；分支：`codex/yolov8-obb-minimal`。
+- 基线：`codex/project-ai-controls`（975db183，开放PR #2），先合入总控，再将本模块PR基线切换main。不要合入已关闭未合并PR #1的职责调整。
+- 实现与验证：本控制文档所在提交包含源码、契约、样例和真实验证记录。
+- 上传：实现提交`9e7bc453d4bee14e930bc58e767136a39ae61e7b`已推送并核对远端一致；[PR #4](https://github.com/roxysunrise/remote-sensing-ship-review/pull/4)已创建，base为`codex/project-ai-controls`。本条后续文档提交以分支最新HEAD为准；未合并、未部署。
+- 隔离工作区：`C:/Users/28028/.codex/worktrees/ship-detection-delivery/遥感应用`。原工作区保留；未reset/clean/stash或提交其职责提案。
 
-## 本地观察与入口
+## 目标与边界
 
-原目录：`C:/Users/28028/OneDrive/图片/文档/ChatGPT/遥感应用`。
+复用已有YOLOv8l-OBB权重，完成RGB PNG/JPEG单图推理、原图四点旋转框、类别/置信度、模型和参数元信息、JSON及叠框。无训练、切片合并、HTTP、Worker、业务存储/权限或其他框架模型导入。
 
-读取到的本地文件（本控制规则分支不包含这些实现）：
+A提供Python/CLI能力；应用接入按当前main协议进行，本模块不更改双方职责。公共契约仍为待确认提案。
 
-- `algorithm/ship_detector.py`、`algorithm/README.md`：单图推理入口和说明。
-- `algorithm/requirements.txt`、`algorithm/requirements-tested.txt`：依赖与环境快照。
-- `contracts/ship-detection-v0.1.md`：检测契约提案，不能视为双方已确认。
-- `scripts/run-detection.ps1`、`scripts/prepare_detection_samples.py`、`scripts/verify_detection_smoke.py`。
-- `tests/test_detection_contract.py`：契约验证。
-- `models/yolov8l-obb-dota-v1-80e/README.md`：权重说明；权重本身不应上传普通 Git。
+## 文件与调用
 
-本地文档描述输入为 RGB PNG/JPEG，调用 `ShipDetector.predict` 后输出 JSON 与四顶点旋转框，可用 `save_result` 保存叠框预览。具体字段和限制以实际代码及契约为准，避免在此复制第二套规范。
+- `algorithm/ship_detector.py`：ShipDetector.predict、save_result和CLI。
+- `algorithm/README.md`、requirements文件：启动、依赖与已测环境、样例准备、限制。
+- `contracts/ship-detection-v0.1.md`：坐标/输出/错误/耗时定义；`contracts/examples/`是真实正常/空结果/错误JSON，不包含影像。
+- `scripts/run-detection.ps1`、`prepare_detection_samples.py`、`verify_detection_smoke.py`：本地启动/数据准备/真实模型检查。
+- `tests/test_detection_contract.py`：无需权重的几何与输入检查。
+- `models/yolov8l-obb-dota-v1-80e/README.md`：来源与校验；best.pt本身不入Git。
+- `docs/validation/ship-detection-2026-10-27.json`：轻量验证记录，含实际源码哈希；大量输出、源影像及虚拟环境保留本地。
 
-在原目录且依赖、权重、样例确实存在时，文档提供以下调用；本次未执行：
+新机器先按algorithm/README.md准备环境、权重和合法本地样例，然后在仓库根目录：
 
 ```powershell
 & scripts/run-detection.ps1 -Image datasets/smoke/dense.png -Device cpu
@@ -31,19 +35,33 @@
 & .venv/Scripts/python.exe scripts/verify_detection_smoke.py --device 0
 ```
 
-## 验证与边界
+RGB/EXIF/像素和参数限制、原图坐标、错误码均以契约为唯一来源。空结果合法；CLI失败退出2。同步调用不提供取消、自动重试或项目权限；应用层不得直接作为公网不可信上传/模型入口。重复输出目录会覆盖已有JSON和预览，不自动保存业务版本。
 
-本地 algorithm/README.md 记载 CPU/GPU 推理和样例结果，但本次仅阅读，没有复核环境、权重、输出、指标或测试。后续负责人在交付前重新执行必要检查并把实际命令、结果和提交号填回。
+## 本轮重新验证证据
 
-当前文档声明仅为单图缩放推理，无切片合并、HTTP、异步Worker或业务持久化；小船样例存在漏检。同源 DOTA 样例未排除训练重叠，不能称为泛化精度评估。
+2026-10-27，在隔离工作区使用原工作区`.venv/Scripts/python.exe`执行当前复制的源码；权重与样例只复制到Git忽略目录。环境：Python3.10.20、torch2.9.1+cu128、Ultralytics8.4.189、Pillow12.2.0、RTX5060 Laptop8GB。它不是从互联网干净环境安装的证明。
 
-## 下一步
+| 实际检查 | 结果与证据 | 未覆盖 |
+|---|---|---|
+| `python -m unittest discover -s tests -v` | 4项通过：顶点顺序/退化与非有限坐标、RGB/JPEG、灰度损坏/缺失输入 | 非完整安全/模糊测试 |
+| `python scripts/verify_detection_smoke.py --device 0` | PASS；dense32、small0、empty0、非方形JPEG35 | small标注1艘但漏检；不是精度通过 |
+| 密集框与标注IoU检查 | 25个预测与标注IoU≥0.5；缩小至640的非方形JPEG为23个，检查坐标缩放/方向/位置 | 非一对一精度评估，无泛化结论 |
+| `python -m algorithm.ship_detector ... --device cpu` | 真实CPU推理成功，dense检出32，JSON/预览保存成功 | 多机/并发未测 |
+| 缺失影像CLI | INPUT_NOT_FOUND，退出2；错误样例已准备 | 非全部故障码逐项实测 |
+| `python -m pip check` | No broken requirements found | 其他机器需重新验证 |
 
-1. 联系/核对当前正在开发的会话及文件状态，避免覆盖其修改。
-2. 核对代码、依赖、权重哈希、许可、坐标契约和错误处理；实际运行测试及必要样例。
-3. 更新本控制文档为真实验证记录，再按 AGENTS.md 用专门功能分支交付源码、契约、说明和必要样例。
-4. 对接 B 的调用需求；未完成前不宣称已接入完整应用。
+轻量记录在docs/validation，完整叠框/控制台输出在隔离工作区outputs/smoke（不上传）。历史GPU热调用约50–71ms仅本机观测，具体本轮数值见验证JSON。几何正确、模型质量、业务集成和部署是不同结论。
 
-## 变更记录
+## 协作、风险与下一步
 
-- 2026-10-27：建立本地未提交检测实现的导航记录；保留其所有原文件，未执行或上传该模块代码。
+接入方按algorithm/README.md复用ShipDetector实例，使用契约和真实JSON样例开发；先确认字段/坐标，再接入业务服务。权重不在Git，新机器缺少私有best.pt时不能直接推理；可先跑不依赖权重的单元检查。
+
+小船漏检、密集场景漏检/误检、全图缩小损失、无切片合并均保留。样例来自DOTA-v1.5 val，与既有DOTA-v1训练同源，未排除重叠；不能当独立精度基准。许可及源影像规则见样例说明。权重只允许可信来源。
+
+下一步：审阅前置PR #2和本模块PR；公共契约待确认；用独立合法影像验收质量，再决定阈值/切片，不自动扩大本轮范围。
+
+## 简短变更记录
+
+- 2026-10-27：控制规则初建时仅导航本地未提交检测实现，未运行或上传该模块；保留此历史边界。
+- 2026-10-27：用户授权按总控上传；隔离交付检测实现并重新验证CPU/GPU、正常/空/错误场景，增加真实JSON样例及验证记录；未改变PR #1的关闭状态，未自动合并或部署。
+- 2026-10-27：实现提交9e7bc45远端核对一致，创建Issue #3和PR #4；PR基线显式依赖#2，上传完成与合并/部署分开记录。
