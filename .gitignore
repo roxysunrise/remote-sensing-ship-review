@@ -1,0 +1,42 @@
+# Authentication and local configuration
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+id_rsa*
+id_ed25519*
+
+# Dependencies and caches
+node_modules/
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Runtime and build artifacts
+dist/
+build/
+coverage/
+*.log
+*.sqlite*
+*.db
+uploads/
+storage/
+backups/
+outputs/
+datasets/
+weights/
+*.pt
+*.pth
+*.onnx
+*.ckpt
+*.safetensors
+
+# Editor and operating system
+.idea/
+.DS_Store
+Thumbs.db
