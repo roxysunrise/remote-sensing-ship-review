@@ -9,9 +9,9 @@
 - 入口：algorithm/ship_detector.py中的ShipDetector.predict_large与CLI；algorithm/tiled_inference.py为内部切片/几何核心，algorithm/errors.py统一CLI与导入异常。
 - 接口：[v0.2增量提案](../../contracts/ship-detection-v0.2.md)，待双方确认。旧predict仍输出v0.1；调用示例/依赖见algorithm/README.md；正常/空/错误JSON见contracts/examples。
 - 已实现、已实际验证：17项测试、GPU四类样例、CPU非方形JPEG、PowerShell包装器成功、CLI错误退出2、pip check。详细命令/原始源码哈希/环境/结果见[验证记录](../validation/ship-detection-tiled-2026-10-29.md)及同名JSON。
-- Git上传：本轮提交/PR将在检查清单后登记；尚未合并、部署或应用验收。
+- Git上传：实现提交dc6432b46fa696c151b28e67fe61c9aa656865f2已推送，远端SHA核对一致；[PR #5](https://github.com/roxysunrise/remote-sensing-ship-review/pull/5)开放，base为codex/yolov8-obb-minimal，明确依赖#4/#2。后续文档记录以分支最新HEAD为准；尚未合并、部署或应用验收。
 - 限制：完整解码RGB PNG/JPEG，67,108,864像素、4096片/20000候选上限；无残片拼接/地理坐标。参考参数不是效果保证，组合图不是独立精度证据；历史小船漏检未据此消除。
-- 下一步：完成上传并审阅依赖PR，接入方支持v0.2；用独立标注大图评估整图与切片的AP/召回、边界错误、阈值和耗时，再决定优化。
+- 下一步：审阅依赖PR及#5，接入方支持v0.2；用独立标注大图评估整图与切片的AP/召回、边界错误、阈值和耗时，再决定优化。
 
 以下为2026-10-27单图基线历史记录；其中无切片等边界描述仅适用于当时交付，不代表当前大图模式。
 
@@ -81,3 +81,4 @@ RGB/EXIF/像素和参数限制、原图坐标、错误码均以契约为唯一�
 - 2026-10-27：用户授权按总控上传；隔离交付检测实现并重新验证CPU/GPU、正常/空/错误场景，增加真实JSON样例及验证记录；未改变PR #1的关闭状态，未自动合并或部署。
 - 2026-10-27：实现提交9e7bc45远端核对一致，创建Issue #3和PR #4；PR基线显式依赖#2，上传完成与合并/部署分开记录。
 - 2026-10-29：同一检测模块增加大图模式，复用单图推理核心，完成覆盖/坐标/多边形去重及真实CPU/GPU检查；不宣称精度改善，未自动合并或部署。
+- 2026-10-29：20个本轮文件检查后提交dc6432b并核对远端，创建PR #5；base显式依赖PR #4，保留原工作区未提交文件。上传与合并/部署分别记录。
