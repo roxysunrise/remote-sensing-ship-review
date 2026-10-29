@@ -1,0 +1,206 @@
+{
+  "date": "2026-10-29",
+  "python": "3.10.20",
+  "opencv": "4.13.0",
+  "numpy": "2.2.6",
+  "model": {
+    "backend": "ultralytics",
+    "task": "obb",
+    "weights_file": "best.pt",
+    "architecture": "OBBModel",
+    "checkpoint_model": "yolov8l-obb.pt",
+    "checkpoint_ultralytics_version": "8.1.5",
+    "checkpoint_epoch": -1,
+    "weights_sha256": "6508d583f538e858d498335c0fb6efd24c9e5116823eb4152f6d6979193cd26f",
+    "ultralytics_version": "8.4.189",
+    "torch_version": "2.9.1+cu128",
+    "class_names": {
+      "0": "plane",
+      "1": "ship",
+      "2": "storage-tank",
+      "3": "baseball-diamond",
+      "4": "tennis-court",
+      "5": "basketball-court",
+      "6": "ground-track-field",
+      "7": "harbor",
+      "8": "bridge",
+      "9": "large-vehicle",
+      "10": "small-vehicle",
+      "11": "helicopter",
+      "12": "roundabout",
+      "13": "soccer-ball-field",
+      "14": "swimming-pool"
+    },
+    "device": "0",
+    "device_name": "NVIDIA GeForce RTX 5060 Laptop GPU"
+  },
+  "evidence_scope": "Real model, source-derived composite and synthetic blank; not independent accuracy evaluation",
+  "samples": {
+    "composite": {
+      "size": [
+        2305,
+        1537
+      ],
+      "image_sha256": "4951b1638a9f6ddb0fc3164e72fc781a0593ee53a72b827d332ec42b3a1b8956",
+      "count": 37,
+      "tile_count": 12,
+      "candidates": 174,
+      "suppressed": 137,
+      "parameters": {
+        "conf": 0.25,
+        "iou": 0.7,
+        "imgsz": 1024,
+        "max_det": 1000,
+        "classes": [
+          1
+        ],
+        "half": false,
+        "augment": false,
+        "tiling": true,
+        "tile_size": 1024,
+        "stride": 512,
+        "merge_iou": 0.1
+      },
+      "timing_ms": {
+        "model_load": 1926.4294000022346,
+        "decode": 50.674500002060086,
+        "predict_call": 619.7063999861712,
+        "merge": 4.509400008828379,
+        "total_before_save": 677.2654999949737,
+        "preview_save": 118.19040001137182
+      },
+      "warnings": [
+        "TILE_BOUNDARIES: truncated objects may remain or be missed; fragments are not stitched"
+      ],
+      "predictions_with_translated_gt_iou_ge_0_5": 23,
+      "full_image_count": 37,
+      "annotated_ship_count": 43,
+      "full_predictions_with_translated_gt_iou_ge_0_5": 22,
+      "full_image_predict_ms": 50.64390000188723
+    },
+    "empty": {
+      "size": [
+        1024,
+        1024
+      ],
+      "image_sha256": "bac8f9274f5572c63ddeb7144f5ced43d07a3fe4b949e2a5c1047e8c3ba1682e",
+      "count": 0,
+      "tile_count": 9,
+      "candidates": 0,
+      "suppressed": 0,
+      "parameters": {
+        "conf": 0.25,
+        "iou": 0.7,
+        "imgsz": 640,
+        "max_det": 1000,
+        "classes": [
+          1
+        ],
+        "half": false,
+        "augment": false,
+        "tiling": true,
+        "tile_size": 640,
+        "stride": 320,
+        "merge_iou": 0.1
+      },
+      "timing_ms": {
+        "model_load": 1926.4294000022346,
+        "decode": 22.66990000498481,
+        "predict_call": 228.92770000908058,
+        "merge": 0.0011999945854768157,
+        "total_before_save": 253.3328999998048,
+        "preview_save": 113.24639999656938
+      },
+      "warnings": [
+        "TILE_BOUNDARIES: truncated objects may remain or be missed; fragments are not stitched"
+      ]
+    },
+    "nonsquare": {
+      "size": [
+        1024,
+        512
+      ],
+      "image_sha256": "0ef1dc94b0aecced73fd01af4b53ffefbcbff89ddec8e5cbb9bbb341493b824d",
+      "count": 32,
+      "tile_count": 3,
+      "candidates": 69,
+      "suppressed": 37,
+      "parameters": {
+        "conf": 0.25,
+        "iou": 0.7,
+        "imgsz": 640,
+        "max_det": 1000,
+        "classes": [
+          1
+        ],
+        "half": false,
+        "augment": false,
+        "tiling": true,
+        "tile_size": 640,
+        "stride": 320,
+        "merge_iou": 0.1
+      },
+      "timing_ms": {
+        "model_load": 1926.4294000022346,
+        "decode": 7.220900006359443,
+        "predict_call": 86.55180000641849,
+        "merge": 1.7720999894663692,
+        "total_before_save": 96.2710000021616,
+        "preview_save": 38.12720000860281
+      },
+      "warnings": [
+        "TILE_BOUNDARIES: truncated objects may remain or be missed; fragments are not stitched"
+      ]
+    },
+    "large_blank": {
+      "size": [
+        4097,
+        4097
+      ],
+      "image_sha256": "e27c34d8a2ab5f8496a93c7bc9e0173837e96880a3250deed686130c6674ef9c",
+      "count": 0,
+      "tile_count": 9,
+      "candidates": 0,
+      "suppressed": 0,
+      "parameters": {
+        "conf": 0.25,
+        "iou": 0.7,
+        "imgsz": 320,
+        "max_det": 1000,
+        "classes": [
+          1
+        ],
+        "half": false,
+        "augment": false,
+        "tiling": true,
+        "tile_size": 2048,
+        "stride": 2048,
+        "merge_iou": 0.1
+      },
+      "timing_ms": {
+        "model_load": 1926.4294000022346,
+        "decode": 53.82259999169037,
+        "predict_call": 325.9284999949159,
+        "merge": 0.000900006853044033,
+        "total_before_save": 380.5318999948213,
+        "preview_save": 97.4595000006957
+      },
+      "warnings": [
+        "TILE_BOUNDARIES: truncated objects may remain or be missed; fragments are not stitched",
+        "TILE_DOWNSCALED: small targets may be lost"
+      ]
+    }
+  },
+  "single_tile_equivalence": {
+    "count": 32,
+    "minimum_polygon_iou": 0.9999999218137822,
+    "note": "merge_iou=1 disables extra suppression"
+  },
+  "source_sha256": {
+    "algorithm/ship_detector.py": "0af1283cf23093140a37f01d8407519e721e20efab723247b1d0fbee3e78e343",
+    "algorithm/tiled_inference.py": "b208a1e217865f463802d84f34d69f35e91f69aa75d078ce33e3bd436aa7f1d5",
+    "algorithm/errors.py": "85217ed4f5fb643ead4a0c3d225cc50efd8bb356e90255843d7df4a248f366a9",
+    "scripts/verify_tiled_smoke.py": "4b0e9f96173f78626e78d1b428fa8830eaf0898d787bc29d56b8343536f9b130"
+  },
+  "status": "PASS"
+}

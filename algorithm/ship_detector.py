@@ -6,21 +6,18 @@ from datetime import datetime, timezone
 import hashlib
 import json
 import math
+from numbers import Real
 from pathlib import Path
 import sys
 import time
 
 from PIL import Image, ImageDraw, UnidentifiedImageError
+from .errors import DetectionError
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_WEIGHTS = ROOT / "models/yolov8l-obb-dota-v1-80e/best.pt"
 MAX_PIXELS = 16_777_216
-
-
-class DetectionError(Exception):
-    def __init__(self, code: str, message: str):
-        self.code = code
-        super().__init__(message)
+MAX_LARGE_PIXELS = 67_108_864
 
 
 def sha256(path: Path) -> str:
@@ -31,7 +28,7 @@ def sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def read_image(path: str | Path) -> Image.Image:
+def read_image(path: str | Path, *, max_pixels: int = MAX_PIXELS) -> Image.Image:
     path = Path(path)
     if not path.is_file():
         raise DetectionError("INPUT_NOT_FOUND", f"Image does not exist: {path}")
@@ -41,8 +38,8 @@ def read_image(path: str | Path) -> Image.Image:
         with Image.open(path) as source:
             if source.format not in {"PNG", "JPEG"} or source.mode != "RGB":
                 raise DetectionError("INVALID_IMAGE", "Image must decode as RGB PNG/JPEG")
-            if source.width * source.height > MAX_PIXELS:
-                raise DetectionError("IMAGE_TOO_LARGE", f"Maximum pixels: {MAX_PIXELS}; tiling is not implemented")
+            if source.width * source.height > max_pixels:
+                raise DetectionError("IMAGE_TOO_LARGE", f"Maximum pixels for this mode: {max_pixels}")
             if source.getexif().get(274, 1) not in {None, 1}:
                 raise DetectionError("EXIF_ORIENTATION", "Normalize EXIF orientation before inference")
             source.load()
@@ -108,18 +105,17 @@ class ShipDetector:
         }
         self.load_ms = (time.perf_counter() - start) * 1000
 
-    def predict(self, image_path: str | Path, *, conf: float = 0.25, iou: float = 0.7,
-                imgsz: int = 1024, max_det: int = 1000) -> dict:
-        """Return JSON-compatible ship detections in ORIGINAL image pixels."""
-        if not (math.isfinite(conf) and 0 < conf <= 1 and math.isfinite(iou) and 0 < iou <= 1):
+    @staticmethod
+    def validate_parameters(conf, iou, imgsz, max_det):
+        if not all(isinstance(v, Real) and not isinstance(v, bool) and math.isfinite(v) and 0 < v <= 1 for v in (conf, iou)):
             raise DetectionError("INVALID_ARGUMENT", "conf and iou must be in (0, 1]")
         if isinstance(imgsz, bool) or not isinstance(imgsz, int) or not 32 <= imgsz <= 2048 or imgsz % 32:
             raise DetectionError("INVALID_ARGUMENT", "imgsz must be a multiple of 32 from 32 to 2048")
         if isinstance(max_det, bool) or not isinstance(max_det, int) or not 1 <= max_det <= 10000:
             raise DetectionError("INVALID_ARGUMENT", "max_det must be an integer from 1 to 10000")
-        started = time.perf_counter()
-        image = read_image(image_path)
-        decoded = time.perf_counter()
+
+    def _infer_image(self, image: Image.Image, *, conf, iou, imgsz, max_det):
+        """Shared sequential model call; coordinates refer to this decoded PIL image."""
         try:
             result = self.model.predict(source=image, device=self.device, conf=conf, iou=iou,
                                         imgsz=imgsz, max_det=max_det, classes=self.ship_ids,
@@ -128,7 +124,6 @@ class ShipDetector:
             raise DetectionError("OUT_OF_MEMORY", "Insufficient memory; use CPU or reduce imgsz") from exc
         except Exception as exc:
             raise DetectionError("INFERENCE_FAILED", "Model inference failed; check environment and device") from exc
-        inferred = time.perf_counter()
         if result.obb is None or tuple(result.orig_shape) != (image.height, image.width):
             raise DetectionError("INVALID_MODEL_OUTPUT", "Missing OBB output or mismatched image dimensions")
         detections = []
@@ -139,6 +134,26 @@ class ShipDetector:
             detections.append({"id": len(detections) + 1, "polygon": canonical_polygon(polygon),
                                "class_id": int(cls), "class_name": result.names[int(cls)],
                                "confidence": float(score)})
+        return detections, result.speed
+
+    def predict_large(self, image_path: str | Path, *, tile_size: int = 1024,
+                      stride: int = 512, merge_iou: float = 0.1, conf: float = 0.25,
+                      iou: float = 0.7, imgsz: int = 1024, max_det: int = 1000) -> dict:
+        """Tiled inference in original pixels; see ship-detection v0.2 contract."""
+        from .tiled_inference import predict_large
+        return predict_large(self, image_path, tile_size=tile_size, stride=stride,
+                             merge_iou=merge_iou, conf=conf, iou=iou,
+                             imgsz=imgsz, max_det=max_det)
+
+    def predict(self, image_path: str | Path, *, conf: float = 0.25, iou: float = 0.7,
+                imgsz: int = 1024, max_det: int = 1000) -> dict:
+        """Return JSON-compatible ship detections in ORIGINAL image pixels."""
+        self.validate_parameters(conf, iou, imgsz, max_det)
+        started = time.perf_counter()
+        image = read_image(image_path)
+        decoded = time.perf_counter()
+        detections, backend = self._infer_image(image, conf=conf, iou=iou, imgsz=imgsz, max_det=max_det)
+        inferred = time.perf_counter()
         warnings = []
         if len(detections) >= max_det:
             warnings.append("MAX_DET_REACHED: detections may be truncated")
@@ -157,7 +172,7 @@ class ShipDetector:
             "timing_ms": {"model_load": self.load_ms, "decode": (decoded - started) * 1000,
                           "predict_call": (inferred - decoded) * 1000,
                           "total_before_save": (time.perf_counter() - started) * 1000,
-                          "backend": result.speed},
+                          "backend": backend},
             "count": len(detections), "warnings": warnings, "detections": detections,
         }
 
@@ -167,7 +182,7 @@ def save_result(result: dict, image_path: str | Path, output_dir: str | Path) ->
     start = time.perf_counter()
     directory = Path(output_dir)
     directory.mkdir(parents=True, exist_ok=True)
-    image = read_image(image_path)
+    image = read_image(image_path, max_pixels=MAX_LARGE_PIXELS if result["parameters"]["tiling"] else MAX_PIXELS)
     if sha256(Path(image_path)) != result["image"]["sha256"]:
         raise DetectionError("IMAGE_CHANGED", "Input image changed after inference")
     draw = ImageDraw.Draw(image)
@@ -196,11 +211,26 @@ def main(argv=None) -> int:
     parser.add_argument("--iou", type=float, default=0.7)
     parser.add_argument("--imgsz", type=int, default=1024)
     parser.add_argument("--max-det", type=int, default=1000)
+    parser.add_argument("--tiled", action="store_true", help="Use overlapping tiles and polygon NMS")
+    parser.add_argument("--tile-size", type=int, default=1024)
+    parser.add_argument("--stride", type=int, default=512)
+    parser.add_argument("--merge-iou", type=float, default=0.1)
     args = parser.parse_args(argv)
     try:
-        read_image(args.image)  # Fail on invalid input before loading a model.
+        read_image(args.image, max_pixels=MAX_LARGE_PIXELS if args.tiled else MAX_PIXELS).close()
+        if not args.tiled and (args.tile_size != 1024 or args.stride != 512 or args.merge_iou != 0.1):
+            raise DetectionError("INVALID_ARGUMENT", "Tile options require --tiled")
+        ShipDetector.validate_parameters(args.conf, args.iou, args.imgsz, args.max_det)
+        if args.tiled:
+            from .tiled_inference import validate_tiling
+            validate_tiling(args.tile_size, args.stride, args.merge_iou)
         detector = ShipDetector(args.weights, args.device)
-        result = detector.predict(args.image, conf=args.conf, iou=args.iou, imgsz=args.imgsz, max_det=args.max_det)
+        options = dict(conf=args.conf, iou=args.iou, imgsz=args.imgsz, max_det=args.max_det)
+        if args.tiled:
+            result = detector.predict_large(args.image, tile_size=args.tile_size, stride=args.stride,
+                                            merge_iou=args.merge_iou, **options)
+        else:
+            result = detector.predict(args.image, **options)
         paths = save_result(result, args.image, args.output)
         print(json.dumps({"ok": True, "count": result["count"], **paths}, ensure_ascii=False))
         return 0

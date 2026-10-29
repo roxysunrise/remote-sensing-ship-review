@@ -2,6 +2,8 @@
 
 本契约对应 `algorithm/ship_detector.py`，不表示已合入共同标准；不包含业务 API、鉴权、任务队列或人工修订。
 
+新增大图模式见[v0.2增量提案](ship-detection-v0.2.md)。本文件继续约束原`predict()`；原调用不自动切片、不改变schema或像素上限。
+
 ## 输入和调用
 
 本地可信 Ultralytics OBB `.pt` 权重 + RGB PNG/JPEG 单张影像。默认权重为已下载的 YOLOv8l-OBB best.pt。类别表必须包含 `ship`；禁止假定所有模型的类别编号相同。未实现任意框架权重导入。

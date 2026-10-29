@@ -1,0 +1,169 @@
+{
+  "schema_version": "ship-detection/0.2",
+  "created_at": "2026-10-29T09:39:41.153054+00:00",
+  "image": {
+    "file_name": "large-blank.png",
+    "sha256": "e27c34d8a2ab5f8496a93c7bc9e0173837e96880a3250deed686130c6674ef9c",
+    "width": 4097,
+    "height": 4097,
+    "mode": "RGB"
+  },
+  "coordinates": {
+    "unit": "pixel",
+    "origin": "top-left",
+    "x_axis": "right",
+    "y_axis": "down",
+    "polygon_order": "clockwise; start=min(y,x)",
+    "space": "original_image",
+    "clipped": false
+  },
+  "model": {
+    "backend": "ultralytics",
+    "task": "obb",
+    "weights_file": "best.pt",
+    "architecture": "OBBModel",
+    "checkpoint_model": "yolov8l-obb.pt",
+    "checkpoint_ultralytics_version": "8.1.5",
+    "checkpoint_epoch": -1,
+    "weights_sha256": "6508d583f538e858d498335c0fb6efd24c9e5116823eb4152f6d6979193cd26f",
+    "ultralytics_version": "8.4.189",
+    "torch_version": "2.9.1+cu128",
+    "class_names": {
+      "0": "plane",
+      "1": "ship",
+      "2": "storage-tank",
+      "3": "baseball-diamond",
+      "4": "tennis-court",
+      "5": "basketball-court",
+      "6": "ground-track-field",
+      "7": "harbor",
+      "8": "bridge",
+      "9": "large-vehicle",
+      "10": "small-vehicle",
+      "11": "helicopter",
+      "12": "roundabout",
+      "13": "soccer-ball-field",
+      "14": "swimming-pool"
+    },
+    "device": "0",
+    "device_name": "NVIDIA GeForce RTX 5060 Laptop GPU"
+  },
+  "parameters": {
+    "conf": 0.25,
+    "iou": 0.7,
+    "imgsz": 320,
+    "max_det": 1000,
+    "classes": [
+      1
+    ],
+    "half": false,
+    "augment": false,
+    "tiling": true,
+    "tile_size": 2048,
+    "stride": 2048,
+    "merge_iou": 0.1
+  },
+  "tiling": {
+    "tile_count": 9,
+    "candidate_count": 0,
+    "suppressed_count": 0,
+    "merge_method": "class_aware_polygon_nms",
+    "tiles": [
+      {
+        "id": 1,
+        "x": 0,
+        "y": 0,
+        "width": 2048,
+        "height": 2048,
+        "candidate_count": 0,
+        "predict_ms": 51.8205999978818
+      },
+      {
+        "id": 2,
+        "x": 2048,
+        "y": 0,
+        "width": 2048,
+        "height": 2048,
+        "candidate_count": 0,
+        "predict_ms": 34.70409999135882
+      },
+      {
+        "id": 3,
+        "x": 2049,
+        "y": 0,
+        "width": 2048,
+        "height": 2048,
+        "candidate_count": 0,
+        "predict_ms": 32.31949999462813
+      },
+      {
+        "id": 4,
+        "x": 0,
+        "y": 2048,
+        "width": 2048,
+        "height": 2048,
+        "candidate_count": 0,
+        "predict_ms": 32.847900001797825
+      },
+      {
+        "id": 5,
+        "x": 2048,
+        "y": 2048,
+        "width": 2048,
+        "height": 2048,
+        "candidate_count": 0,
+        "predict_ms": 34.7951000003377
+      },
+      {
+        "id": 6,
+        "x": 2049,
+        "y": 2048,
+        "width": 2048,
+        "height": 2048,
+        "candidate_count": 0,
+        "predict_ms": 34.155499990447424
+      },
+      {
+        "id": 7,
+        "x": 0,
+        "y": 2049,
+        "width": 2048,
+        "height": 2048,
+        "candidate_count": 0,
+        "predict_ms": 35.331099992617965
+      },
+      {
+        "id": 8,
+        "x": 2048,
+        "y": 2049,
+        "width": 2048,
+        "height": 2048,
+        "candidate_count": 0,
+        "predict_ms": 31.725000008009374
+      },
+      {
+        "id": 9,
+        "x": 2049,
+        "y": 2049,
+        "width": 2048,
+        "height": 2048,
+        "candidate_count": 0,
+        "predict_ms": 38.21329999482259
+      }
+    ]
+  },
+  "timing_ms": {
+    "model_load": 1926.4294000022346,
+    "decode": 53.82259999169037,
+    "predict_call": 325.9284999949159,
+    "merge": 0.000900006853044033,
+    "total_before_save": 380.5318999948213,
+    "preview_save": 97.4595000006957
+  },
+  "count": 0,
+  "warnings": [
+    "TILE_BOUNDARIES: truncated objects may remain or be missed; fragments are not stitched",
+    "TILE_DOWNSCALED: small targets may be lost"
+  ],
+  "detections": []
+}
