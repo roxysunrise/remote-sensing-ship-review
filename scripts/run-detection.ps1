@@ -2,7 +2,11 @@ param(
     [string]$Image = "datasets/smoke/dense.png",
     [string]$Output = "outputs/inference",
     [string]$Device = "cpu",
-    [double]$Conf = 0.25
+    [double]$Conf = 0.25,
+    [switch]$Tiled,
+    [int]$TileSize = 1024,
+    [int]$Stride = 512,
+    [double]$MergeIou = 0.1
 )
 $ErrorActionPreference = "Stop"
 $projectRoot = Split-Path -Parent $PSScriptRoot
@@ -13,7 +17,12 @@ if (-not (Test-Path -LiteralPath $pythonPath)) {
 Push-Location $projectRoot
 try {
     $env:PYTHONIOENCODING = "utf-8"
-    & $pythonPath -m algorithm.ship_detector $Image --output $Output --device $Device --conf $Conf
+    $detectionArgs = @("-m", "algorithm.ship_detector", $Image, "--output", $Output, "--device", $Device,
+        "--conf", $Conf.ToString([System.Globalization.CultureInfo]::InvariantCulture),
+        "--tile-size", $TileSize, "--stride", $Stride,
+        "--merge-iou", $MergeIou.ToString([System.Globalization.CultureInfo]::InvariantCulture))
+    if ($Tiled) { $detectionArgs += "--tiled" }
+    & $pythonPath @detectionArgs
     $inferenceExit = $LASTEXITCODE
 } finally {
     Pop-Location

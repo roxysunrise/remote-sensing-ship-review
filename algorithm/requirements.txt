@@ -1,2 +1,4 @@
 ultralytics==8.4.189
 Pillow>=10.0,<13
+numpy>=1.23,<3
+opencv-python>=4.6,<5

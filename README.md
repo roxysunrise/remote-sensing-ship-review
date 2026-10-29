@@ -4,6 +4,8 @@
 
 当前状态：已实现本地YOLOv8l-OBB单图推理最小模块，复用已有权重，CPU/GPU已实测；完整应用、服务部署及整体技术栈尚未完成或确定。
 
+检测模块现增加[大图推理模式](contracts/ship-detection-v0.2.md)：重叠切片、四点坐标还原和跨片多边形NMS；通过`predict_large()`或CLI `--tiled`调用。它属于同一检测模块，验证流程不等于精度提升。
+
 ## 本地检测模块
 
 启动、依赖、样例与限制见[算法模块说明](algorithm/README.md)，输出见[检测契约v0.1提案](contracts/ship-detection-v0.1.md)，交付状态见[模块控制文档](docs/module-controls/ship-detection.md)。准备本地权重、环境与样例后运行 `scripts/run-detection.ps1 -Image datasets/smoke/dense.png -Device 0`，CPU用 `-Device cpu`。权重、影像、数据集与虚拟环境不入Git。
