@@ -140,6 +140,14 @@ button { cursor: pointer; }
 .rail button .ic { font-size: 15px; line-height: 1; }
 .rail button:hover { background: var(--panel); color: var(--tx); }
 .rail button.on { background: rgba(56, 178, 163, .12); border-color: rgba(56, 178, 163, .4); color: var(--accent); }
+.rail a.rail-link {
+  display: flex; flex-direction: column; align-items: center; gap: 3px;
+  padding: 9px 2px;
+  border: 1px solid transparent; border-radius: 7px;
+  color: var(--tx-2); font-size: 11.5px; text-decoration: none;
+}
+.rail a.rail-link:hover { background: var(--panel); color: var(--tx); }
+.rail a.rail-link .ic { font-size: 15px; line-height: 1; }
 .rail .dot { width: 5px; height: 5px; border-radius: 50%; background: var(--warn); }
 
 main { flex: 1; min-width: 0; position: relative; overflow: hidden; }

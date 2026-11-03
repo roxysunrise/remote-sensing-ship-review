@@ -3,10 +3,8 @@
 面向港口遥感影像的船舶检测与复核工作台，实现自仓库
 `roxysunrise/remote-sensing-ship-review` 的算法模块与四份职责/设计文档。
 
-数据结构对齐 ship-detection/0.2 契约：坐标单位、原点、顶点顺序、
+数据结构严格对齐 `contracts/ship-detection-v0.2.md`：坐标单位、原点、顶点顺序、
 `count` 语义、`source_tile_id`、`tiling.*` 合并统计均与 Python 模块一致。
-前端实际使用的接口规格见 `api/openapi.yaml`；`contracts/ship-detection-v0.2.md`
-由算法分支维护，合入 main 后以其为准。
 
 ## 运行
 
@@ -23,6 +21,69 @@ python -m http.server 8765 --bind 127.0.0.1 --directory frontend
 配置与接入说明见 [`LOGIN.md`](LOGIN.md)。工作台内原有的登录门禁仅用于
 `apiMode: 'mock'` 的离线演示：真实后端部署时把 `config.js` 的 `apiMode` 改为 `'http'`，
 未登录访问工作台会自动跳转到登录页。
+
+## 图片 / 视频检测与 AI 辅助标注
+
+第二个入口是独立页面 `detect.html`，主应用左侧导航「智能检测」可进入：
+
+```
+http://127.0.0.1:8765/detect.html
+```
+
+| 能力 | 实现 |
+|---|---|
+| 图片检测 | 载入 PNG / JPEG / WebP，整幅检测，支持缩放、平移、1:1 |
+| 视频检测 | 载入 MP4 / WebM；播放、逐帧步进、时间轴、连续抽帧检测 |
+| 分割框坐标 | 四角 / 多边形顶点、中心、宽高、角度、包围盒、面积；可精确编辑与复制 JSON |
+| AI 辅助框选 | 在目标周围拖粗框或点选，调用分割接口返回候选，人工采纳后落为标注 |
+| 导出 | 当前媒体的全部模型结果与手工 / AI 标注导出为 `ship-annotation-set/1.0` JSON |
+
+### 接口已预留
+
+界面不直接 fetch，也不直接跑模型：
+
+```
+detect.js ──▶ window.DetectAPI ──┬── mock（api/detect-mock.js，离线启发式）
+                                 └── http（真实推理服务）
+```
+
+后端就绪后只改 [`detect-config.js`](detect-config.js)：
+
+```js
+window.DETECT_CONFIG = {
+  mode: 'http',
+  baseUrl: 'https://ship-api.example.com',  // 同源可留空
+  apiPrefix: '/api/v1'
+};
+```
+
+| 文件 | 作用 |
+|---|---|
+| [`api/DETECT_API.md`](api/DETECT_API.md) | 请求 / 响应、坐标约定、错误码、接入顺序 |
+| [`api/detect-openapi.yaml`](api/detect-openapi.yaml) | 5 个端点的机器可读规格 |
+| [`api/detect-api.js`](api/detect-api.js) | 双适配器与统一 `DetectApiError` |
+| [`api/detect-mock.js`](api/detect-mock.js) | 浏览器内亮度连通域 / ROI 分割，仅用于演示 |
+
+端点：`GET /vision/capabilities`、`POST /vision/sessions`、`POST /vision/detect`、
+`POST /vision/segment`、`POST /vision/jobs/{job_id}/cancel`（预留，完整定义见文档）。
+检测结果的多边形必须是**原始媒体像素**，
+AI 候选的 `confidence` 必须为 `null`，只给 `quality` 质量分。
+
+### 演示视频
+
+没有预置视频文件：点击「生成演示视频」会用 `MediaRecorder` 把 `assets/harbor.png`
+录成约 6 秒的 1280×720 WebM（Ken Burns 平移），再按普通视频载入。录制需要浏览器支持
+`canvas.captureStream` 与 WebM 编码；不支持时请直接上传本地视频。
+
+### 已知限制
+
+- `detect-mock.js` 是启发式，不是模型推理；界面常驻「演示推理」标记，换真实影像后
+  效果会明显下降。
+- 标注绑定帧：视频里在某一帧画的框只在该帧显示，不做跨帧跟踪。
+- 浏览器无法读取视频真实帧率，默认 30 fps，可在底部手动修改；帧号与逐帧步进据此计算。
+  修改帧率会清空按帧绑定的检测与标注，避免时间错位。
+- 导出 JSON 是前端中间格式，后端可按需映射到 `ship-detection/0.2`；本页不写项目草稿，
+  需要持久化时由后端补保存接口（例如复用主应用的 `/tasks/{id}/draft`）。
 
 ## 与后端对接
 
