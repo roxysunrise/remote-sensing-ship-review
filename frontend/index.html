@@ -1,0 +1,495 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>遥感影像船舶检测与人机协同复核系统</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%2338b2a3'/%3E%3Cpath d='M6 20h20l-4 6H10z' fill='%230a0f14'/%3E%3Crect x='14' y='7' width='4' height='12' fill='%230a0f14'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<!-- ============ 登录（受控开户，无公开注册） ============ -->
+<div class="login-gate" id="login">
+  <form class="login-card" id="login-form">
+    <h1>遥感影像船舶检测与复核</h1>
+    <p class="sub">面向港口巡查的影像分析工作台 · 受控开户</p>
+
+    <div class="field">
+      <label for="login-user">账号</label>
+      <select id="login-user">
+        <option value="lin.analyst">lin.analyst — 项目分析员</option>
+        <option value="roxysunrise">roxysunrise — 项目负责人</option>
+      </select>
+    </div>
+    <div class="field">
+      <label for="login-pass">密码</label>
+      <input id="login-pass" type="password" value="demo" autocomplete="current-password">
+    </div>
+    <div class="field">
+      <label for="login-project">项目空间</label>
+      <select id="login-project">
+        <option value="harbor-a">港口巡查 A 区</option>
+        <option value="harbor-b">港口巡查 B 区（无权限）</option>
+      </select>
+    </div>
+
+    <button class="btn primary" type="submit" style="width:100%;margin-top:6px">登录</button>
+
+    <div class="login-note">
+      首版采用受控开户，不提供公开注册、短信或邮件。选择“B 区”可验证<b>跨项目隔离</b>：服务端会拒绝非成员项目。
+    </div>
+  </form>
+</div>
+
+<!-- ============ 应用 ============ -->
+<div class="app hidden" id="app">
+
+  <header class="topbar">
+    <div class="brand">
+      <div class="mark">船</div>
+      <div>
+        遥感船舶检测与复核
+        <small>ship-detection / 0.2 · 人机协同</small>
+      </div>
+    </div>
+    <div class="ctx">
+      <span class="chip">项目 <b id="ctx-project">—</b></span>
+      <span class="chip">角色 <b id="ctx-role">—</b></span>
+      <span class="chip" id="ctx-model">模型 <b>YOLOv8l-OBB</b></span>
+      <span class="chip">接口 <b id="ctx-api">—</b></span>
+    </div>
+    <div class="top-right">
+      <span class="badge demo" title="上传、任务进度与 AI 候选为前端模拟；坐标、几何与统计口径按真实契约实现">演示数据</span>
+      <span class="chip" id="ctx-user">—</span>
+      <button class="btn ghost sm" id="btn-logout">退出</button>
+    </div>
+  </header>
+
+  <div class="shell">
+    <nav class="rail" id="rail">
+      <button data-view="project"><span class="ic">◱</span>项目</button>
+      <button data-view="upload"><span class="ic">↑</span>上传</button>
+      <button data-view="task"><span class="ic">▶</span>任务</button>
+      <button data-view="workbench"><span class="ic">▦</span>工作台</button>
+      <button data-view="review"><span class="ic">◐</span>疑难复核</button>
+      <button data-view="stats"><span class="ic">∑</span>区域统计</button>
+      <button data-view="history"><span class="ic">⟲</span>修订历史</button>
+      <button data-view="export"><span class="ic">↧</span>报告导出</button>
+    </nav>
+
+    <main>
+
+      <!-- ---------- 项目 ---------- -->
+      <section class="view" id="view-project">
+        <div class="pad">
+          <div class="view-head">
+            <h2>项目空间</h2>
+            <p>所有影像、任务、结果与报告均绑定项目，服务端逐请求校验成员关系</p>
+          </div>
+
+          <div class="grid-2" style="margin-top:14px">
+            <div class="card">
+              <h3>当前项目</h3>
+              <dl class="kv">
+                <dt>项目名称</dt><dd id="pj-name">港口巡查 A 区</dd>
+                <dt>项目编号</dt><dd class="mono">PRJ-A-0271</dd>
+                <dt>当前角色</dt><dd id="pj-role">项目分析员</dd>
+                <dt>影像数量</dt><dd>1 幅（harbor.png，2305 × 1537）</dd>
+                <dt>检测任务</dt><dd id="pj-task">未创建</dd>
+                <dt>存储</dt><dd>私有对象存储 · 项目内可见</dd>
+              </dl>
+              <div class="hr"></div>
+              <h3>项目成员</h3>
+              <div id="pj-members"></div>
+            </div>
+
+            <div class="card">
+              <h3>权限边界</h3>
+              <p class="muted" style="font-size:12.5px;margin-top:0">
+                前端隐藏按钮不能替代服务端校验。以下项目在真实实现中必须逐请求检查：
+              </p>
+              <div class="check done"><span class="box">✓</span><span>影像、预览瓦片、任务与结果读取</span></div>
+              <div class="check done"><span class="box">✓</span><span>上传会话的创建、续传、取消与完成</span></div>
+              <div class="check done"><span class="box">✓</span><span>修订保存与版本切换</span></div>
+              <div class="check done"><span class="box">✓</span><span>区域统计与报告下载</span></div>
+              <div class="check"><span class="box">○</span><span>短期签名链接的即时撤权（需鉴权代理）</span></div>
+              <div class="hr"></div>
+              <div class="note">
+                项目选择项来自账号实际成员关系，<b>不能由浏览器提交任意项目编号获得权限</b>。跨项目默认不可见。
+              </div>
+            </div>
+          </div>
+
+          <div class="grid-3" style="margin-top:14px">
+            <div class="card">
+              <h3>影像 <span class="tag">真实契约</span></h3>
+              <div class="mono" style="font-size:11.5px;color:var(--tx-2);line-height:1.9">
+                harbor.png<br>
+                2305 × 1537 · RGB<br>
+                <span class="dim">sha256</span> <span id="pj-sha">—</span>
+              </div>
+            </div>
+            <div class="card">
+              <h3>检测结果 <span class="tag model">模型原始</span></h3>
+              <div class="stat-line" style="margin-bottom:0">
+                <div class="s"><b id="pj-count">—</b><span>模型候选</span></div>
+                <div class="s"><b id="pj-cand">—</b><span>合并前候选</span></div>
+                <div class="s"><b id="pj-tiles">—</b><span>切片数</span></div>
+              </div>
+            </div>
+            <div class="card">
+              <h3>下一步</h3>
+              <p class="muted" style="font-size:12.5px;margin:0 0 12px">上传就绪后创建检测任务，再进入工作台复核。</p>
+              <button class="btn primary sm" data-goto="upload">前往上传</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ---------- 上传 ---------- -->
+      <section class="view" id="view-upload">
+        <div class="pad">
+          <div class="view-head">
+            <h2>可靠上传</h2>
+            <p>传输完成 ≠ 可检测：分片传输、完整性校验、图像验证、预览生成是四个独立状态</p>
+          </div>
+
+          <div class="grid-2" style="margin-top:14px;align-items:start">
+            <div class="card">
+              <div class="dropzone" id="dropzone">
+                <div class="big">拖入影像，或点击选择</div>
+                <div class="muted" style="font-size:12.5px">首版支持可解码的 RGB PNG / JPEG，保留原始文件</div>
+                <div style="margin-top:14px">
+                  <button class="btn sm" id="btn-pick-demo" type="button">使用示例影像 harbor.png</button>
+                </div>
+                <input type="file" id="file-input" accept=".png,.jpg,.jpeg" class="hidden">
+              </div>
+
+              <div class="row" style="margin-top:14px">
+                <button class="btn sm" id="btn-pause" disabled>暂停传输</button>
+                <button class="btn sm" id="btn-abort" disabled>模拟网络中断</button>
+                <div class="spacer"></div>
+                <span class="muted" id="upload-meta" style="font-size:11.5px"></span>
+              </div>
+
+              <div style="margin-top:12px">
+                <div class="bar"><i id="upload-bar"></i></div>
+                <div class="row" style="margin-top:8px">
+                  <span class="mono" id="upload-pct" style="font-size:11.5px;color:var(--tx-2)">0%</span>
+                  <span class="spacer"></span>
+                  <span class="mono" id="upload-chunk" style="font-size:11.5px;color:var(--tx-3)"></span>
+                </div>
+              </div>
+
+              <div class="steps" id="upload-steps"></div>
+
+              <div class="row" style="margin-top:16px">
+                <button class="btn primary" id="btn-create-task" disabled>创建检测任务</button>
+                <span class="muted" id="upload-block" style="font-size:12px">未就绪影像不能创建检测任务</span>
+              </div>
+            </div>
+
+            <div class="card">
+              <h3>上传状态机</h3>
+              <pre class="mono" style="font-size:11.5px;color:var(--tx-2);line-height:1.75;margin:0;white-space:pre-wrap">
+传输中 ──100%──▶ 合并校验 ──▶ 图像验证 ──▶ 预览生成 ──▶ 可分析
+   ▲                │            │            │
+   └── 续传 ────────┘            │            │
+                       校验失败 ✗ │   解码失败 ✗ │
+                                  ▼            ▼
+                              不可检测（需重新上传）</pre>
+              <div class="hr"></div>
+              <h3>必做约束</h3>
+              <div class="check done"><span class="box">✓</span><span>以服务端已接收分片为准，重复提交不追加字节</span></div>
+              <div class="check done"><span class="box">✓</span><span>核对预期长度 + 最终文件校验和</span></div>
+              <div class="check done"><span class="box">✓</span><span>校验扩展名、文件签名与实际解码结果</span></div>
+              <div class="check done"><span class="box">✓</span><span>限定文件大小、解码后像素与并发</span></div>
+              <div class="check"><span class="box">○</span><span>刷新后需重新关联原文件才能续传</span></div>
+              <div class="note warn" style="margin-top:12px">
+                浏览器无法在刷新后自动重新读取本地文件，续传必须由用户重新选择同一文件再恢复。
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ---------- 任务 ---------- -->
+      <section class="view" id="view-task">
+        <div class="pad">
+          <div class="view-head">
+            <h2>检测任务</h2>
+            <p>异步大图检测与渐进反馈：进度来自真实切片记录，临时计数在合并完成后才成为最终值</p>
+          </div>
+
+          <div class="grid-2" style="margin-top:14px;align-items:start">
+            <div class="card">
+              <div class="row" style="margin-bottom:12px">
+                <h3 style="margin:0">任务 #T-0271</h3>
+                <span class="tag" id="task-state">未创建</span>
+                <div class="spacer"></div>
+                <span class="mono muted" style="font-size:11.5px" id="task-attempt">第 1 次尝试</span>
+              </div>
+
+              <div class="stat-line">
+                <div class="s"><b id="task-tiles">0/12</b><span>已完成切片</span></div>
+                <div class="s"><b id="task-temp">—</b><span>临时候选 <span class="tag pending">临时</span></span></div>
+                <div class="s"><b id="task-final">—</b><span>最终数量 <span class="tag confirmed">已发布</span></span></div>
+              </div>
+
+              <div class="progress-line"><i id="task-bar"></i></div>
+
+              <div class="row" style="margin-top:14px">
+                <button class="btn primary" id="btn-run-task">开始检测</button>
+                <button class="btn" id="btn-cancel-task" disabled>取消</button>
+                <button class="btn" id="btn-retry-task" disabled>重试</button>
+                <div class="spacer"></div>
+                <button class="btn sm" id="btn-goto-wb" disabled>进入工作台</button>
+              </div>
+
+              <div class="note" style="margin-top:14px">
+                取消在可终止边界生效，页面先显示<b>取消请求中</b>，不伪装已停止；重试会重新计算整次尝试，
+                中间结果按尝试编号隔离，<b>不会产生重复最终计数</b>。
+              </div>
+            </div>
+
+            <div class="card">
+              <h3>切片进度 <span class="tag" id="tile-params">1024 / 512</span></h3>
+              <div class="tiles-grid" id="tiles-grid"></div>
+              <div class="hr"></div>
+              <div class="mono" style="font-size:11.5px;color:var(--tx-2);line-height:1.8" id="task-log">
+                等待创建任务…
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ---------- 工作台 ---------- -->
+      <section class="view" id="view-workbench">
+        <div class="wb">
+          <div class="banner hidden" id="wb-banner">
+            <span>正在查看历史版本 <b id="wb-banner-id">v0</b>（只读，不会修改任何数据）</span>
+            <span class="spacer"></span>
+            <button class="btn sm" id="btn-exit-readonly">返回当前工作副本</button>
+          </div>
+          <div class="wb-bar">
+            <div class="tool-group" id="tool-group">
+              <button class="tool on" data-tool="select">选择</button>
+              <button class="tool" data-tool="add">新增框</button>
+              <button class="tool" data-tool="ai">AI 补框</button>
+            </div>
+            <div class="sep"></div>
+            <button class="btn sm" id="btn-confirm">确认选中</button>
+            <button class="btn sm" id="btn-delete">删除选中</button>
+            <div class="sep"></div>
+            <button class="btn sm" id="btn-undo">撤销</button>
+            <button class="btn sm" id="btn-redo">重做</button>
+            <div class="sep"></div>
+            <button class="btn sm" id="btn-fit">适应窗口</button>
+            <button class="btn sm" id="btn-one">1:1</button>
+            <button class="btn sm" id="btn-tiles">切片网格</button>
+            <button class="btn sm" id="btn-labels">编号</button>
+            <div class="spacer"></div>
+            <span class="tag" id="wb-dirty">无未保存修改</span>
+            <button class="btn primary sm" id="btn-save">保存修订</button>
+          </div>
+
+          <div class="wb-body">
+            <aside class="wb-side">
+              <div class="side-head">
+                <div class="row" style="margin-bottom:8px">
+                  <span class="muted" style="font-size:12px">目标列表</span>
+                  <div class="spacer"></div>
+                  <span class="mono dim" id="list-count" style="font-size:11.5px"></span>
+                </div>
+                <div class="filters" id="list-filters">
+                  <button class="on" data-f="all">全部</button>
+                  <button data-f="pending">未检查</button>
+                  <button data-f="confirmed">已确认</button>
+                  <button data-f="modified">已修改</button>
+                  <button data-f="deleted">已删除</button>
+                  <button data-f="low">低置信</button>
+                </div>
+              </div>
+              <div class="det-list" id="det-list"></div>
+            </aside>
+
+            <div class="canvas-wrap" id="wb-wrap">
+              <canvas id="wb-canvas"></canvas>
+              <div class="overlay-hint" id="wb-hint">滚轮缩放 · 拖动平移 · 点击选择</div>
+              <div class="zoom-hud"><span id="wb-zoom">100%</span></div>
+            </div>
+
+            <aside class="wb-side right">
+              <div class="side-head row">
+                <span class="muted" style="font-size:12px">目标详情</span>
+                <div class="spacer"></div>
+                <span class="tag" id="detail-origin" style="display:none"></span>
+              </div>
+              <div class="detail" id="wb-detail">
+                <div class="empty">未选择目标<br><span class="dim">在画布或列表中选择一个检测框</span></div>
+              </div>
+            </aside>
+          </div>
+        </div>
+      </section>
+
+      <!-- ---------- 疑难复核 ---------- -->
+      <section class="view" id="view-review">
+        <div class="pad">
+          <div class="view-head">
+            <h2>疑难复核队列</h2>
+            <p>按可解释的原因排序，不是“检测正确概率”；确认单个目标不等于整图审核完成</p>
+          </div>
+
+          <div class="grid-2" style="margin-top:14px;align-items:start">
+            <div>
+              <div class="row" style="margin-bottom:10px">
+                <span class="muted" style="font-size:12.5px">待复核 <b id="q-count">0</b> 项</span>
+                <div class="spacer"></div>
+                <button class="btn sm" id="btn-q-refresh">重新计算</button>
+              </div>
+              <div id="q-list"></div>
+            </div>
+
+            <div class="card">
+              <h3>排序依据</h3>
+              <div class="check"><span class="box">•</span><span><b>模型把握较低</b>：置信度低于 0.45</span></div>
+              <div class="check"><span class="box">•</span><span><b>靠近处理边界</b>：框到所属切片边缘 &lt; 12 px</span></div>
+              <div class="check"><span class="box">•</span><span><b>靠近影像边缘</b>：框到影像边界 &lt; 20 px</span></div>
+              <div class="check"><span class="box">•</span><span><b>疑似重复检出</b>：与另一框互相包含中心点，说明 NMS 未合并（碎片）</span></div>
+              <div class="check"><span class="box">•</span><span><b>空区域抽样</b>：512 网格内无任何检测</span></div>
+              <div class="hr"></div>
+              <p class="muted" style="font-size:12px;margin:0">
+                前四条由真实几何计算得出（复用多边形 IoU 判定），空区域抽样基于切片候选数。
+                排序分数只用于安排复核顺序，<b>不能称为检测正确概率</b>。
+              </p>
+              <div class="hr"></div>
+              <h3>抽样检查建议</h3>
+              <div id="q-samples" class="mono" style="font-size:11.5px;color:var(--tx-2);line-height:1.8"></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ---------- 统计 ---------- -->
+      <section class="view" id="view-stats">
+        <div class="wb">
+          <div class="wb-bar">
+            <div class="tool-group">
+              <button class="tool on" data-stat-tool="region">圈选区域</button>
+              <button class="tool" data-stat-tool="pan">平移</button>
+            </div>
+            <div class="sep"></div>
+            <button class="btn sm" id="btn-region-clear">清除区域</button>
+            <button class="btn sm" id="btn-region-close">闭合区域</button>
+            <div class="spacer"></div>
+            <span class="muted" style="font-size:11.5px">点击添加顶点，双击或“闭合区域”完成</span>          </div>
+          <div class="wb-body">
+            <div class="canvas-wrap" id="st-wrap">
+              <canvas id="st-canvas"></canvas>
+              <div class="overlay-hint">计数规则：目标中心点落入区域</div>
+            </div>
+            <aside class="wb-side right" style="width:330px;flex-basis:330px">
+              <div class="side-head"><span class="muted" style="font-size:12px">区域盘点</span></div>
+              <div class="detail">
+                <div id="st-empty" class="empty">尚未圈选区域<br><span class="dim">在左侧点击若干顶点圈出关注区域</span></div>
+                <div id="st-result" class="hidden">
+                  <table class="tbl">
+                    <thead><tr><th>口径</th><th class="num">数量</th></tr></thead>
+                    <tbody id="st-rows"></tbody>
+                  </table>
+                  <div class="note" style="margin-top:12px">
+                    重叠区域<b>不直接相加</b>当总数；同一目标只按其中心点归属一次。
+                  </div>
+                </div>
+                <div class="hr"></div>
+                <h3 style="font-size:12.5px">全图口径</h3>
+                <table class="tbl">
+                  <thead><tr><th>状态</th><th class="num">数量</th></tr></thead>
+                  <tbody id="st-global"></tbody>
+                </table>
+              </div>
+            </aside>
+          </div>
+        </div>
+      </section>
+
+      <!-- ---------- 历史 ---------- -->
+      <section class="view" id="view-history">
+        <div class="pad">
+          <div class="view-head">
+            <h2>修订历史</h2>
+            <p>模型原始结果不可变；人工修订以追加版本记录，历史版本只读</p>
+          </div>
+          <div class="grid-2" style="margin-top:14px;align-items:start">
+            <div>
+              <div id="ver-list"></div>
+            </div>
+            <div class="card">
+              <h3>版本说明</h3>
+              <p class="muted" style="font-size:12.5px;margin-top:0">
+                v0 是模型输出，任何时候都不被修改。每次保存生成新版本，记录操作者、时间与变更摘要。
+              </p>
+              <div class="hr"></div>
+              <h3>变更摘要 <span class="tag" id="diff-ver">v0</span></h3>
+              <table class="tbl">
+                <tbody id="diff-rows"></tbody>
+              </table>
+              <div class="hr"></div>
+              <div class="note warn">
+                报告导出绑定指定版本，后续修订不会悄悄改变旧报告。
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ---------- 导出 ---------- -->
+      <section class="view" id="view-export">
+        <div class="pad">
+          <div class="view-head">
+            <h2>报告导出</h2>
+            <p>导出绑定影像、任务、模型与结果版本，页面与报告使用同一统计口径</p>
+          </div>
+
+          <div class="grid-2" style="margin-top:14px;align-items:start">
+            <div class="card">
+              <h3>导出内容</h3>
+              <div class="field">
+                <label for="ex-version">结果版本</label>
+                <select id="ex-version"></select>
+              </div>
+              <div class="check"><span class="box">☑</span><span>检测结果表（CSV，含四点多边形与复核状态）</span></div>
+              <div class="check"><span class="box">☑</span><span>标注图（PNG，按原图像素绘制）</span></div>
+              <div class="check"><span class="box">☑</span><span>分析报告（JSON，含模型、参数与统计口径）</span></div>
+              <div class="row" style="margin-top:14px">
+                <button class="btn primary" id="btn-export">生成并下载</button>
+                <span class="muted" id="ex-status" style="font-size:12px"></span>
+              </div>
+            </div>
+
+            <div class="card">
+              <h3>报告将包含</h3>
+              <dl class="kv" id="ex-preview"></dl>
+            </div>
+          </div>
+        </div>
+      </section>
+
+    </main>
+  </div>
+</div>
+
+<div class="toast-host" id="toasts"></div>
+
+<script src="config.js"></script>
+<script src="auth-session.js"></script>
+<script src="data.js"></script>
+<script src="api/geom.js"></script>
+<script src="api/mock-backend.js"></script>
+<script src="api/client.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
