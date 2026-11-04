@@ -1,0 +1,6 @@
+# 后端运行时依赖。算法依赖见 algorithm/requirements.txt。
+fastapi==0.115.6
+uvicorn==0.34.0
+pydantic==2.10.4
+# 仅测试用（fastapi.testclient 依赖 httpx）
+httpx==0.28.1

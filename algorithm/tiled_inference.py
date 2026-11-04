@@ -78,7 +78,11 @@ def polygon_nms(detections, threshold):
     return [{**d, "id": i + 1} for i, d in enumerate(kept)]
 
 
-def predict_large(detector, image_path, *, tile_size, stride, merge_iou, conf, iou, imgsz, max_det):
+def predict_large(detector, image_path, *, tile_size, stride, merge_iou, conf, iou, imgsz, max_det,
+                  on_progress=None, should_cancel=None):
+    """Tiled inference. `on_progress(tile_id, tile_total, candidate_count)` is optional and does not
+    change results; `should_cancel()` is polled only at tile boundaries, so cancellation is never
+    observed inside a model call and never produces a partial result."""
     validate_tiling(tile_size, stride, merge_iou)
     detector.validate_parameters(conf, iou, imgsz, max_det)
     started = time.perf_counter()
@@ -106,6 +110,10 @@ def predict_large(detector, image_path, *, tile_size, stride, merge_iou, conf, i
                             "width": box[2] - box[0], "height": box[3] - box[1],
                             "candidate_count": len(detections),
                             "predict_ms": (time.perf_counter() - tile_started) * 1000})
+            if on_progress is not None:
+                on_progress(tile_id, len(tiles), len(candidates))
+            if should_cancel is not None and should_cancel():
+                raise DetectionError("CANCELLED", f"Cancelled at tile boundary {tile_id}/{len(tiles)}")
         inferred = time.perf_counter()
         detections = polygon_nms(candidates, merge_iou)
         merged = time.perf_counter()

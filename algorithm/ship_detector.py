@@ -138,12 +138,18 @@ class ShipDetector:
 
     def predict_large(self, image_path: str | Path, *, tile_size: int = 1024,
                       stride: int = 512, merge_iou: float = 0.1, conf: float = 0.25,
-                      iou: float = 0.7, imgsz: int = 1024, max_det: int = 1000) -> dict:
-        """Tiled inference in original pixels; see ship-detection v0.2 contract."""
+                      iou: float = 0.7, imgsz: int = 1024, max_det: int = 1000,
+                      on_progress=None, should_cancel=None) -> dict:
+        """Tiled inference in original pixels; see ship-detection v0.2 contract.
+
+        `on_progress` and `should_cancel` are optional integration hooks used by the task runtime;
+        leaving them out keeps the previous behaviour identical.
+        """
         from .tiled_inference import predict_large
         return predict_large(self, image_path, tile_size=tile_size, stride=stride,
                              merge_iou=merge_iou, conf=conf, iou=iou,
-                             imgsz=imgsz, max_det=max_det)
+                             imgsz=imgsz, max_det=max_det,
+                             on_progress=on_progress, should_cancel=should_cancel)
 
     def predict(self, image_path: str | Path, *, conf: float = 0.25, iou: float = 0.7,
                 imgsz: int = 1024, max_det: int = 1000) -> dict:
