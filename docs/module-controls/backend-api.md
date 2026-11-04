@@ -5,8 +5,10 @@
 - 模块 ID：`backend-api`；A 主责（工程骨架 + 计算接入），业务页面与业务数据模型由 B 方提出并确认。
 - 更新日期：2026-11-04（Asia/Shanghai）。
 - 状态：**可接入**。本地实测通过，未合入 main，未部署，未与前端做浏览器联调。
-- Git：分支 `codex/app-backend`，基线 `codex/ship-tiled-inference`（685eddc）；依赖 PR #2 → #4 → #5。
-- Issue：待建（建议 `#7 交付后端 API 骨架并对接 frontend`）。
+- Git：分支 `codex/app-backend`（实现提交 `148be2e`，远端已核对一致），基线 `codex/ship-tiled-inference`（685eddc）。
+- Issue：[#7](https://github.com/roxysunrise/remote-sensing-ship-review/issues/7)；
+  PR：[#8](https://github.com/roxysunrise/remote-sensing-ship-review/pull/8)（base `codex/ship-tiled-inference`，mergeable clean）。
+- 上传/合并/部署分别记录：已推送并创建 PR；**未合并、未部署、未做应用验收**。
 
 ## 目标与边界
 
@@ -55,4 +57,6 @@
 ## 简短变更记录
 
 - 2026-11-04：新建后端骨架，实现全部 34 个端点；`predict_large` 增加进度/取消钩子（默认行为不变）；
-  补 17 项后端端到端测试与契约校验工具；本地 CPU 实测通过，未上传、未合并、未部署。
+  补 17 项后端端到端测试与契约校验工具；本地 CPU 实测通过。
+- 2026-11-04：实现提交 `148be2e` 已推送并核对远端一致，创建 Issue #7 与 PR #8（base `codex/ship-tiled-inference`）。
+  上传与合并/部署分别记录：未合并、未部署、未做浏览器联调。
