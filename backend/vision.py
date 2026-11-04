@@ -12,15 +12,11 @@ from __future__ import annotations
 import math
 import secrets
 import time
-from pathlib import Path
 
-import numpy as np
 from fastapi import APIRouter, Body
 from PIL import Image
 
-from algorithm.errors import DetectionError
-
-from . import config, detector, errors, imaging
+from . import ai_assist, config, detector, errors, imaging
 
 router = APIRouter(prefix="/vision", tags=["vision"])
 
@@ -120,15 +116,17 @@ def _finish_detect(result: dict, frame: dict, request_id: str, elapsed_ms: float
 
 @router.post("/segment")
 def segment(payload: dict = Body(default_factory=dict)) -> dict:
-    """点选/框选 → 候选旋转框。
+    """点选 / 框选 / 精修 → 候选旋转框。
 
-    首选在 ROI 上跑真实检测模型（漏检目标多半是"整图缩太小"，局部高分辨率能救回来）；
-    模型也没命中时退化为经典轮廓方案，并如实标记来源。
+    核心逻辑在 `ai_assist.propose`（补框与改框共用一份实现）：
+    先在 ROI 上按原分辨率再跑一次检测模型，没命中才退化为经典轮廓。
     """
     request_id = f"req_{secrets.token_hex(4)}"
     frame = payload.get("frame") or {}
     roi = payload.get("roi")
     point = payload.get("point")
+    existing = payload.get("existing_polygon")
+    mode = str(payload.get("mode") or ("refine" if existing else "box" if roi else "point"))
 
     image = _request_image(payload)
     started = time.perf_counter()
@@ -139,30 +137,15 @@ def segment(payload: dict = Body(default_factory=dict)) -> dict:
         sx = width / target_width if target_width else 1.0
         sy = height / target_height if target_height else 1.0
 
-        if roi:
-            x0, y0, x1, y1 = [float(v) for v in roi]
-            box = (min(x0, x1) * sx, min(y0, y1) * sy, max(x0, x1) * sx, max(y0, y1) * sy)
-        elif point:
-            px, py = float(point[0]) * sx, float(point[1]) * sy
-            radius = 48.0
-            box = (px - radius, py - radius, px + radius, py + radius)
-        else:
-            raise errors.invalid("INVALID_REGION", "需要 roi 或 point")
+        # 原图坐标 → 负载坐标（候选再按 1/sx 还原）
+        roi_payload = [roi[0] * sx, roi[1] * sy, roi[2] * sx, roi[3] * sy] if roi else None
+        point_payload = [point[0] * sx, point[1] * sy] if point else None
+        existing_payload = ([[float(p[0]) * sx, float(p[1]) * sy] for p in existing]
+                            if existing else None)
 
-        pad = 8.0
-        left = max(0, int(math.floor(box[0] - pad)))
-        top = max(0, int(math.floor(box[1] - pad)))
-        right = min(width, int(math.ceil(box[2] + pad)))
-        bottom = min(height, int(math.ceil(box[3] + pad)))
-        if right - left < 8 or bottom - top < 8:
-            raise errors.invalid("INVALID_REGION", "选区太小，请重新框选")
-
-        crop = image.crop((left, top, right, bottom))
-        try:
-            candidates = _roi_candidates(crop, left, top, sx, sy)
-        finally:
-            crop.close()
-
+        candidates = ai_assist.propose(detector.service, image, roi=roi_payload,
+                                       point=point_payload, mode=mode,
+                                       existing_polygon=existing_payload)
         if not candidates:
             raise errors.invalid("NO_CANDIDATE", "该区域没有可用候选，请改用手动标注")
 
@@ -171,12 +154,15 @@ def segment(payload: dict = Body(default_factory=dict)) -> dict:
             "request_id": request_id,
             "frame": {"index": int(frame.get("index") or 0), "time_ms": int(frame.get("time_ms") or 0),
                       "width": target_width, "height": target_height},
-            "model": {"name": "roi-oriented-proposal", "version": "0.1"},
+            "model": {"name": "roi-oriented-proposal", "version": "0.2"},
             "elapsed_ms": elapsed_ms,
             "roi": roi,
+            "mode": mode,
             "candidates": [
                 {"id": f"c{index}", "label": "ship", "quality": item["quality"],
-                 "confidence": None, "polygon": item["polygon"], "reason": item["reason"]}
+                 "confidence": None, "source": item["source"],
+                 "polygon": [[round(x / sx, 3), round(y / sy, 3)] for x, y in item["polygon"]],
+                 "reason": item["reason"]}
                 for index, item in enumerate(candidates, 1)
             ],
         }
@@ -184,48 +170,8 @@ def segment(payload: dict = Body(default_factory=dict)) -> dict:
         image.close()
 
 
-def _roi_candidates(crop: Image.Image, left: int, top: int, sx: float, sy: float) -> list[dict]:
-    """先在 ROI 上跑真实模型，没命中再退化为经典轮廓。"""
-    candidates: list[dict] = []
-    params = {"tiling": False, "conf": 0.15, "iou": 0.7,
-              "imgsz": _align(max(crop.size), low=32, high=1024), "max_det": 10}
-    result = detector.service.predict_image(crop, params)
-    for det in sorted(result["detections"], key=lambda d: -float(d["confidence"]))[:2]:
-        polygon = [[(x + left) / sx, (y + top) / sy] for x, y in det["polygon"]]
-        candidates.append({"polygon": _round_polygon(polygon),
-                           "quality": round(float(det["confidence"]), 4),
-                           "reason": "局部高分辨率检测命中"})
-    if not candidates:
-        fallback = _contour_candidate(crop, left, top, sx, sy)
-        if fallback:
-            candidates.append(fallback)
-    return candidates
-
-
 def _round_polygon(points) -> list[list[float]]:
     return [[round(float(x), 3), round(float(y), 3)] for x, y in points]
-
-
-def _contour_candidate(crop: Image.Image, left: int, top: int, sx: float, sy: float) -> dict | None:
-    """经典兜底：Otsu 阈值 + 最大轮廓外接旋转矩形。不是语义分割。"""
-    import cv2
-
-    gray = np.asarray(crop.convert("L"))
-    _, mask = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    if not contours:
-        return None
-    area = max(cv2.contourArea(c) for c in contours)
-    if area < 40:
-        return None
-    contour = max(contours, key=cv2.contourArea)
-    (cx, cy), (w, h), angle = cv2.minAreaRect(contour)
-    box = cv2.boxPoints(((cx, cy), (w, h), angle))
-    polygon = [[(px + left) / sx, (py + top) / sy] for px, py in box]
-    fill = area / max(1.0, w * h)
-    return {"polygon": _round_polygon(polygon),
-            "quality": round(min(0.75, 0.35 + 0.4 * fill), 4),
-            "reason": "经典阈值轮廓兜底（非语义分割）"}
 
 
 @router.post("/jobs/{job_id}/cancel")

@@ -73,6 +73,7 @@ backend/
   storage.py     私有文件存储、分片合并、SHA-256
   imaging.py     解码校验、预览生成、请求体图像解码
   geometry.py    复核原因、抽样网格、区域计数（复用 algorithm 的几何）
+  ai_assist.py   AI 候选核心：ROI 重检 + 轮廓兜底、合理性过滤、refine 约束（两个入口共用）
   security.py    口令哈希、会话令牌、登录限速
   maintenance.py 启动清理：过期上传、旧尝试产物、残留临时文件
   db.py          SQLite schema 与访问
@@ -98,6 +99,7 @@ backend/
 | 区域统计 | 真实计算 | 中心点落入规则，model/effective/deleted/added/delta |
 | 导出 | 真实 | CSV / JSON / PNG，绑定版本；单格式失败不影响其他格式 |
 | AI 候选 | **部分真实** | 先在 ROI 上跑真实检测模型；模型未命中时退化为阈值轮廓（`reason` 会写明） |
+| AI 候选：补框 / 改框 | 真实计算 | `mode: point/box` 补漏检；`mode: refine` + `existing_polygon` 精修已有框，带"不许跳到隔壁船"的约束 |
 | `/vision/detect` | 真实 | 解码 data_url → 推理 → 按 `frame/image` 比例还原到原始媒体像素 |
 | `/vision/segment` | **部分真实** | 同上；不是语义分割，`confidence` 恒为 `null`，只给 `quality` |
 

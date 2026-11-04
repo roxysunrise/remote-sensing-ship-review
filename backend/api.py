@@ -17,7 +17,7 @@ from fastapi.responses import FileResponse, Response
 
 from algorithm.errors import DetectionError
 
-from . import config, db, detector, errors, geometry, imaging, security, storage
+from . import ai_assist, config, db, detector, errors, geometry, imaging, security, storage
 
 router = APIRouter()
 
@@ -927,77 +927,29 @@ def get_export_file(export_id: str, name: str, state: dict = State) -> FileRespo
 # --------------------------------------------------------------------------
 
 def _candidate_polygon(image_row, body: dict) -> dict:
-    """点选/框选 → 候选旋转框。
+    """点选 / 框选 / 精修 → 候选旋转框。
 
-    先在 ROI 上跑真实检测模型（局部高分辨率能救回整图缩得太小的漏检目标）；
-    模型没命中时退化为经典阈值轮廓，并在 reason 里如实说明来源。
+    核心逻辑在 `ai_assist.propose`（与检测页共用一份实现）：先在 ROI 上按原分辨率
+    再跑一次检测模型，没命中才退化为经典阈值轮廓。这里只负责读图与坐标（原图空间）。
     """
-    import cv2
-    import numpy as np
     from PIL import Image
 
     path = storage.blob_path(image_row["stored_name"])
     with Image.open(path) as source:
         image = source.convert("RGB")
     try:
-        width, height = image.size
-        mode = body.get("mode") or ("box" if body.get("box") else "point")
-        if mode == "box" and body.get("box"):
-            x0, y0, x1, y1 = [float(v) for v in body["box"]]
-        elif body.get("point"):
-            px, py = float(body["point"][0]), float(body["point"][1])
-            x0, y0, x1, y1 = px - 48, py - 48, px + 48, py + 48
-        else:
-            raise errors.invalid("INVALID_REGION", "需要 point 或 box")
-
-        pad = 8.0
-        left = max(0, int(min(x0, x1) - pad))
-        top = max(0, int(min(y0, y1) - pad))
-        right = min(width, int(max(x0, x1) + pad))
-        bottom = min(height, int(max(y0, y1) + pad))
-        if right - left < 8 or bottom - top < 8:
-            raise errors.invalid("INVALID_REGION", "选区太小，请重新框选")
-
-        crop = image.crop((left, top, right, bottom))
-        temp = config.TMP_DIR / f"candidate_{db.new_id('tmp')}.png"
-        crop.save(temp)
-        candidates: list[dict] = []
-        try:
-            result = detector.service.predict(temp, {
-                "tiling": False, "conf": 0.15, "iou": 0.7,
-                "imgsz": max(32, min(1024, int(math.ceil(max(crop.size) / 32.0) * 32))),
-                "max_det": 10,
-            })
-            for det in sorted(result["detections"], key=lambda d: -float(d["confidence"]))[:2]:
-                candidates.append({
-                    "polygon": geometry.normalize_polygon(
-                        [[x + left, y + top] for x, y in det["polygon"]]),
-                    "quality": round(float(det["confidence"]), 4),
-                    "reason": "局部高分辨率检测命中",
-                })
-        finally:
-            try:
-                temp.unlink()
-            except OSError:
-                pass
-
-        if not candidates:
-            gray = np.asarray(crop.convert("L"))
-            _, mask = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-            contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-            if contours:
-                contour = max(contours, key=cv2.contourArea)
-                area = cv2.contourArea(contour)
-                if area >= 40:
-                    (cx, cy), (w, h), angle = cv2.minAreaRect(contour)
-                    box = cv2.boxPoints(((cx, cy), (w, h), angle))
-                    polygon = [[px + left, py + top] for px, py in box]
-                    fill = area / max(1.0, w * h)
-                    candidates.append({
-                        "polygon": geometry.normalize_polygon(polygon),
-                        "quality": round(min(0.75, 0.35 + 0.4 * fill), 4),
-                        "reason": "经典阈值轮廓兜底（非语义分割）",
-                    })
+        mode = str(body.get("mode") or ("refine" if body.get("existing_polygon")
+                                        else "box" if body.get("box") else "point"))
+        existing = body.get("existing_polygon")
+        if existing is not None and (not isinstance(existing, list) or len(existing) != 4):
+            raise errors.invalid("INVALID_POLYGON", "existing_polygon 必须是 4 个顶点")
+        candidates = ai_assist.propose(
+            detector.service, image,
+            roi=body.get("box"),
+            point=body.get("point"),
+            mode=mode,
+            existing_polygon=existing,
+        )
         if not candidates:
             raise errors.invalid("NO_CANDIDATE", "该区域没有可用候选，请改用手动标注")
         return candidates[0]
@@ -1017,15 +969,21 @@ def create_candidate(image_id: str, body: dict = Body(...), state: dict = State)
     proposal = _candidate_polygon(image, body)
     polygon = proposal["polygon"]
     sides = [math.dist(polygon[i], polygon[(i + 1) % 4]) for i in range(4)]
+    length_px, width_px = max(sides), min(sides)   # 取四条边，不能只取对边
     candidate_id = db.new_id("cand")
     db.execute("INSERT INTO candidates(id,image_id,project_id,user_id,status,polygon,source,width,"
                "length,quality,reason,created_at) VALUES(?,?,?,?,'preview',?,?,?,?,?,?,?)",
                (candidate_id, image_id, image["project_id"], state["user"]["id"],
-                json.dumps(polygon), "prompt_segmentation", min(sides[0], sides[2]),
-                max(sides[0], sides[2]), proposal["quality"], proposal["reason"], db.now()))
+                json.dumps(polygon), proposal["source"], width_px,
+                length_px, proposal["quality"], proposal["reason"], db.now()))
+    # 埋点：用于后面算采纳率与平均修正次数，不做业务判断
+    db.log_event("ai.propose", project_id=image["project_id"], user_id=state["user"]["id"],
+                 target=candidate_id,
+                 detail={"mode": str(body.get("mode") or "point"), "source": proposal["source"],
+                         "quality": proposal["quality"]})
     return {"id": candidate_id, "image_id": image_id, "status": "preview", "polygon": polygon,
-            "source": "prompt_segmentation", "confidence": None,
-            "width": round(min(sides[0], sides[2]), 2), "length": round(max(sides[0], sides[2]), 2),
+            "source": proposal["source"], "confidence": None,
+            "width": round(width_px, 2), "length": round(length_px, 2),
             "quality": proposal["quality"], "reason": proposal["reason"]}
 
 
@@ -1061,8 +1019,10 @@ def accept_candidate(candidate_id: str, body: dict = Body(default_factory=dict),
     )
     db.execute("UPDATE candidates SET status='accepted' WHERE id=?", (candidate_id,))
     db.execute("UPDATE draft_state SET updated_at=? WHERE task_id=?", (db.now(), task["id"]))
-    db.log_event("candidate.accept", project_id=candidate["project_id"], user_id=state["user"]["id"],
-                 target=candidate_id, detail={"task_id": task["id"], "detection_id": next_id})
+    db.log_event("ai.accept", project_id=candidate["project_id"], user_id=state["user"]["id"],
+                 target=candidate_id,
+                 detail={"task_id": task["id"], "detection_id": next_id,
+                         "source": candidate["source"], "quality": candidate["quality"]})
     return _detection_payload(db.one(
         "SELECT * FROM draft_detections WHERE task_id=? AND detection_id=?", (task["id"], next_id)))
 
@@ -1076,5 +1036,8 @@ def cancel_candidate(candidate_id: str, state: dict = State) -> dict:
     if candidate["status"] != "preview":
         raise errors.conflict("CANDIDATE_CLOSED", "该候选已被处理")
     db.execute("UPDATE candidates SET status='cancelled' WHERE id=?", (candidate_id,))
+    db.log_event("ai.reject", project_id=candidate["project_id"], user_id=state["user"]["id"],
+                 target=candidate_id,
+                 detail={"source": candidate["source"], "quality": candidate["quality"]})
     return {"id": candidate_id, "status": "cancelled", "polygon": json.loads(candidate["polygon"])}
 

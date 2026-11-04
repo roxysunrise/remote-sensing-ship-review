@@ -41,6 +41,8 @@
 | 2026-11-04 优化轮 / 同上 + GPU | `python -m unittest discover -s tests` | **41 项通过**（18 算法 + 23 后端） | 并发压力、备份恢复 |
 | 2026-11-04 优化轮 / 同上 | 优化后重跑契约校验 | 业务 21/21、推理 6/6 | 同上 |
 | 2026-11-04 优化轮 / 同上 | 实机 HTTP：预览 `ETag` → 304；`X-Request-Id`；`/vision/detect` 80 ms（GPU、模型已加载） | 通过 | 多客户端并发缓存行为 |
+| 2026-11-04 AI 候选轮 / 同上 | `python -m unittest tests.test_ai_assist -v` | 8 项通过（脚本化检测器，不依赖权重） | 真实分割模型效果 |
+| 2026-11-04 AI 候选轮 / 同上 | `python -m unittest discover -s tests` | **51 项通过**（18 算法 + 25 后端 + 8 ai_assist） | 见下 |
 | 2026-11-04 / 同上 | 重启恢复：启动时把 `queued/running/merging` 任务标记 `SERVER_RESTART` 失败 | 代码路径已实现 | 未做故障注入实测 |
 
 详细记录见 [`docs/validation/backend-2026-11-04.md`](../validation/backend-2026-11-04.md)。
@@ -67,3 +69,6 @@
   片级让锁、`/vision/*` 内存直推、tiled 输入快检、模型预热、ETag/304、请求 ID、队列限流、`fsck` 对账。
   测试 41 项通过，契约 21/21 + 6/6；实测 `/vision/detect` 80 ms（GPU，模型已加载）、预览条件请求 304。
   行为变化：tiled 输入变化改为 `size/mtime` 快检（README 已记录边界）。仍未合并、未部署。
+- 2026-11-04（AI 候选轮）：把 `vision.py` 与 `api.py` 两份重复的 ROI 逻辑合并进 `backend/ai_assist.py`；
+  新增 `mode: refine` + `existing_polygon` 精修模式与"不许跳到隔壁船"的约束；补 `ai.propose / ai.accept / ai.reject`
+  埋点。修掉长宽比对边取值的 bug（长宽恒等 1，导致候选被 ASPECT 过滤掉）。测试 51 项通过。仍未合并、未部署。

@@ -256,29 +256,52 @@ v0 由模型结果自动生成，`readonly=true`。
 
 ## 10. AI 辅助候选
 
+核心逻辑只有一份：`backend/ai_assist.py`（检测页与工作台共用）。两条通道：
+先在 ROI 上按**原分辨率**再跑一次检测模型，没命中才退化为 Otsu 轮廓；两条都不是语义分割。
+
 ### `POST /images/{iid}/ai-candidates`
 
-请求 `{ "point": [x,y], "mode": "point" }` 或 `{ "mode": "box", "box": [x0,y0,x1,y1] }`（原图像素）。
+三种提示方式（`mode` 可省略，按字段自动判定）：
+
+```jsonc
+// 1) 点选补框
+{ "point": [x, y], "mode": "point" }
+// 2) 框选补框
+{ "mode": "box", "box": [x0, y0, x1, y1] }
+// 3) 精修已有框（新增）：围绕该框外扩 25% 再取候选
+{ "mode": "refine", "existing_polygon": [[x,y]×4] }
+```
 
 返回：
 
 ```json
 { "id": "cand_…", "image_id": "img_…", "status": "preview", "polygon": [[…]×4],
-  "source": "prompt_segmentation", "confidence": null,
-  "width": 62.5, "length": 148.2, "quality": 0.71, "reason": "局部高分辨率检测命中" }
+  "source": "detect",            // detect（局部高分辨率命中）| contour（阈值轮廓兜底）
+  "confidence": null, "width": 62.5, "length": 148.2,
+  "quality": 0.71, "reason": "局部高分辨率检测命中" }
 ```
 
-区域没东西：`422 NO_CANDIDATE`（前端提示改手动）。
+区域没东西：`422 NO_CANDIDATE`；提示不合法：`422 INVALID_ARGUMENT`；选区太小：`422 INVALID_REGION`。
 
-### `POST /ai-candidates/{cid}/accept` → `201`，返回写入草稿的 `Detection`
+合理性过滤（会直接丢候选，不只是排序）：
 
-可选请求体 `{ "task_id": "tsk_…" }`；省略时自动取该影像最近一个已完成任务。
-已处理过的候选：`409 CANDIDATE_CLOSED`。
+| 规则 | 门限 | 说明 |
+|---|---|---|
+| 面积占 ROI | 2%–80% | 太小是碎片，太大是背景 |
+| 长宽比 | 1.2–15 | 1:1 多为码头设施；正对船头会被过滤，可手动画 |
+| 精修位移 | 中心偏移 ≤ 30% 边长的 | 防止"精修"跳到隔壁船 |
+| 精修尺寸 | 0.4–2.5 倍 | 防止把整排船框成一条 |
 
-### `POST /ai-candidates/{cid}/cancel` → `{id, status:"cancelled", polygon}`（不改变正式结果）
+### `POST /ai-candidates/{cid}/accept` / `cancel`
 
-> **重要**：当前实现**不是语义分割**。优先在 ROI 上跑真实检测模型，未命中才退化为 Otsu 轮廓，
-> `reason` 会写明来源。验收时不能按"分割质量"评估。
+同前：接受写入草稿（`origin=ai`、`confidence=null`），取消只改状态。
+现在会记录事件：`ai.propose` / `ai.accept` / `ai.reject`（含 `mode`、`source`、`quality`），
+用于后面统计采纳率与平均修正次数。
+
+### 检测页的对应端点
+
+`POST /vision/segment` 支持同一组字段（`roi` / `point` / `existing_polygon`），
+返回的 `candidates[]` 多了 `source` 字段，`model.version` 升为 `0.2`。
 
 ---
 

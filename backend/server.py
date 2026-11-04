@@ -102,6 +102,10 @@ def _startup() -> None:
 
 app.include_router(api.router)
 app.include_router(vision.router)
+# 前端默认把 baseUrl + '/api/v1' 拼在前面（见 frontend/api/client.js），这里同时挂一份带前缀的路由，
+# 免去前端为了联调改 apiPrefix；契约文档里的路径仍以不带前缀为准。
+app.include_router(api.router, prefix="/api/v1", include_in_schema=False)
+app.include_router(vision.router, prefix="/api/v1", include_in_schema=False)
 
 
 def main() -> int:

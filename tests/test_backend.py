@@ -20,11 +20,13 @@ import uuid
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-TMP = tempfile.mkdtemp(prefix="ship-backend-test-")
-os.environ["SHIP_VAR_DIR"] = TMP
-os.environ["SHIP_DB_PATH"] = str(Path(TMP) / "test.db")
-os.environ["SHIP_DEVICE"] = "cpu"
-os.environ["SHIP_SEED_PASSWORD"] = "test-password-1234"
+# 两个测试模块共享同一套环境变量：谁先导入 backend 谁绑定配置，
+# 因此这里一律用 setdefault + 进程级路径，避免 import 顺序导致 DB/口令不一致。
+_TMP = os.environ.setdefault("SHIP_VAR_DIR",
+                             str(Path(tempfile.gettempdir()) / f"ship-test-{os.getpid()}"))
+os.environ.setdefault("SHIP_DB_PATH", str(Path(_TMP) / "test.db"))
+os.environ.setdefault("SHIP_DEVICE", "cpu")
+os.environ.setdefault("SHIP_SEED_PASSWORD", "test-password-1234")
 os.environ.setdefault("SHIP_MAX_ACTIVE_TASKS", "1")
 os.environ.setdefault("SHIP_CHUNK_SIZE", "65536")
 os.environ.setdefault("SHIP_WEIGHTS", str(ROOT / "models/yolov8l-obb-dota-v1-80e/best.pt"))
@@ -470,6 +472,49 @@ class BackendTests(unittest.TestCase):
         self.assertIn("orphan_test.png", report["orphaned"]["blobs"])
         fsck.cleanup(report)
         self.assertFalse(orphan.exists())
+
+
+    def test_ai_candidate_box_hint_and_events(self):
+        if not HAS_WEIGHTS:
+            self.skipTest("缺少本地权重，跳过真实推理用例")
+        image = Image.new("RGB", (400, 300), (18, 24, 32))
+        draw = ImageDraw.Draw(image)
+        draw.rectangle([100, 100, 190, 150], fill=(245, 245, 235))
+        buffer = io.BytesIO()
+        image.save(buffer, format="PNG")
+        state = self._upload(buffer.getvalue(), "ai.png")
+
+        created = self.client.post(f"/images/{state['image_id']}/ai-candidates",
+                                   json={"mode": "box", "box": [90, 90, 200, 160]},
+                                   headers=self.headers)
+        self.assertEqual(created.status_code, 200, created.text)
+        body = created.json()
+        self.assertIsNone(body["confidence"], "候选不得伪造置信度")
+        self.assertIn(body["source"], {"detect", "contour"})
+        self.assertGreater(body["length"], body["width"], "长边必须大于短边")
+        self.assertTrue(0.0 <= body["quality"] <= 1.0)
+
+        row = db.one("SELECT detail FROM events WHERE action='ai.propose' ORDER BY id DESC LIMIT 1")
+        self.assertIsNotNone(row, "ai.propose 事件应被记录")
+
+        # 精修模式：围绕同一位置再提一次（有候选或明确 NO_CANDIDATE 都算契约可用）
+        refine = self.client.post(f"/images/{state['image_id']}/ai-candidates",
+                                  json={"mode": "refine",
+                                        "existing_polygon": [[100, 100], [190, 100],
+                                                             [190, 150], [100, 150]]},
+                                  headers=self.headers)
+        self.assertIn(refine.status_code, (200, 422), refine.text)
+        if refine.status_code == 200:
+            self.assertIsNone(refine.json()["confidence"])
+
+    def test_ai_candidate_rejects_bad_hint(self):
+        state = self._upload(_image_bytes((64, 48)), "ai-bad.png")
+        missing = self.client.post(f"/images/{state['image_id']}/ai-candidates",
+                                   json={"mode": "box"}, headers=self.headers)
+        self.assertIn(missing.status_code, (422,), missing.text)
+        tiny = self.client.post(f"/images/{state['image_id']}/ai-candidates",
+                                json={"mode": "box", "box": [10, 10, 11, 11]}, headers=self.headers)
+        self.assertEqual(tiny.status_code, 422)
 
 
 if __name__ == "__main__":
