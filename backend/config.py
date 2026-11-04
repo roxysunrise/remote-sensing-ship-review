@@ -27,6 +27,12 @@ SESSION_TTL_HOURS = int(os.environ.get("SHIP_SESSION_TTL_HOURS", 7 * 24))
 UPLOAD_TTL_HOURS = int(os.environ.get("SHIP_UPLOAD_TTL_HOURS", 24))
 EXPORT_TTL_HOURS = int(os.environ.get("SHIP_EXPORT_TTL_HOURS", 72))
 
+# 队列治理：每项目同时排队/运行的任务数、全局排队长度
+MAX_ACTIVE_TASKS = int(os.environ.get("SHIP_MAX_ACTIVE_TASKS", 2))
+MAX_QUEUE_LENGTH = int(os.environ.get("SHIP_MAX_QUEUE_LENGTH", 20))
+# 启动时后台预热模型（首次交互不用等 2.6s 加载）
+PRELOAD_MODEL = os.environ.get("SHIP_PRELOAD", "0") not in {"0", "false", "False"}
+
 SEED_PASSWORD = os.environ.get("SHIP_SEED_PASSWORD", "demo-1234")
 SEED_ON_START = os.environ.get("SHIP_SEED_ON_START", "1") not in {"0", "false", "False"}
 

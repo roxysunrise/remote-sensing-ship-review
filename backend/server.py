@@ -10,7 +10,10 @@
 from __future__ import annotations
 
 import argparse
+import logging
+import secrets
 import sys
+import threading
 from pathlib import Path
 
 from fastapi import FastAPI, Request
@@ -22,7 +25,9 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from . import api, config, db, errors, jobs, vision  # noqa: E402
+from . import api, config, db, detector, errors, jobs, maintenance, vision  # noqa: E402
+
+log = logging.getLogger("backend")
 
 app = FastAPI(
     title="遥感船舶检测与复核系统 API",
@@ -36,21 +41,48 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
-    expose_headers=["Content-Disposition"],
+    expose_headers=["Content-Disposition", "ETag", "X-Request-Id"],
 )
 
 
+@app.middleware("http")
+async def _request_context(request: Request, call_next):
+    """给每个请求一个 ID，回写响应头并带进错误信封，方便前端和日志对应。"""
+    request_id = request.headers.get("x-request-id") or f"req_{secrets.token_hex(6)}"
+    request.state.request_id = request_id
+    response = await call_next(request)
+    response.headers["X-Request-Id"] = request_id
+    return response
+
+
+def _with_request_id(request: Request, payload: dict) -> dict:
+    request_id = getattr(request.state, "request_id", None)
+    if request_id and isinstance(payload.get("error"), dict):
+        details = payload["error"].get("details")
+        payload["error"]["details"] = {**(details if isinstance(details, dict) else {}),
+                                      "request_id": request_id}
+    return payload
+
+
 @app.exception_handler(errors.ApiError)
-async def _api_error_handler(_: Request, exc: errors.ApiError) -> JSONResponse:
-    return JSONResponse(status_code=exc.status, content=exc.payload())
+async def _api_error_handler(request: Request, exc: errors.ApiError) -> JSONResponse:
+    return JSONResponse(status_code=exc.status, content=_with_request_id(request, exc.payload()))
 
 
 @app.exception_handler(RequestValidationError)
-async def _validation_handler(_: Request, exc: RequestValidationError) -> JSONResponse:
+async def _validation_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
     details = [{"loc": list(err.get("loc", [])), "msg": err.get("msg", ""),
                 "type": err.get("type", "")} for err in exc.errors()]
-    return JSONResponse(status_code=422,
-                        content=errors.envelope("INVALID_ARGUMENT", "请求参数不合法", {"errors": details}))
+    payload = errors.envelope("INVALID_ARGUMENT", "请求参数不合法", {"errors": details})
+    return JSONResponse(status_code=422, content=_with_request_id(request, payload))
+
+
+def _preload_model() -> None:
+    try:
+        detector.service.load()
+        log.info("模型预加载完成")
+    except Exception as exc:  # 预加载失败不影响服务启动，首个请求会再次尝试并返回 503
+        log.warning("模型预加载失败：%s", exc)
 
 
 @app.on_event("startup")
@@ -60,7 +92,12 @@ def _startup() -> None:
     # 上传校验在后台线程里做，进程重启后不会自己继续，同样要如实标记
     db.execute("UPDATE uploads SET status='failed', stage='failed', error=?"
                " WHERE status='verifying'", ("SERVER_RESTART: 服务重启导致校验中断，请重新提交",))
+    summary = maintenance.run_startup_maintenance()
+    if any(summary.values()):
+        log.info("启动清理：%s", summary)
     jobs.runtime.start()
+    if config.PRELOAD_MODEL:
+        threading.Thread(target=_preload_model, name="model-preload", daemon=True).start()
 
 
 app.include_router(api.router)

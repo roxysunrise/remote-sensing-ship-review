@@ -38,6 +38,9 @@
 | 2026-11-04 / 本地 / Windows + Python3.10.20 + CPU 推理 | `python -m unittest tests.test_backend -v` | 17 项通过（含真实推理端到端 27.7s） | 并发、多进程、GPU |
 | 2026-11-04 / 同上 | `python -m unittest tests.test_detection_contract tests.test_tiled_inference -v` | 原 17 项仍通过（增量改动无行为变化） | — |
 | 2026-11-04 / 同上 | `python -m backend.tools.check_contract --base-url http://127.0.0.1:8012`（spec 取 B 方 PR #6 的 `openapi.yaml` 与 `detect-openapi.yaml`） | 业务 21/21、推理 6/6 通过 | 未覆盖全部 29 端点（其余需构造前置状态） |
+| 2026-11-04 优化轮 / 同上 + GPU | `python -m unittest discover -s tests` | **41 项通过**（18 算法 + 23 后端） | 并发压力、备份恢复 |
+| 2026-11-04 优化轮 / 同上 | 优化后重跑契约校验 | 业务 21/21、推理 6/6 | 同上 |
+| 2026-11-04 优化轮 / 同上 | 实机 HTTP：预览 `ETag` → 304；`X-Request-Id`；`/vision/detect` 80 ms（GPU、模型已加载） | 通过 | 多客户端并发缓存行为 |
 | 2026-11-04 / 同上 | 重启恢复：启动时把 `queued/running/merging` 任务标记 `SERVER_RESTART` 失败 | 代码路径已实现 | 未做故障注入实测 |
 
 详细记录见 [`docs/validation/backend-2026-11-04.md`](../validation/backend-2026-11-04.md)。
@@ -60,3 +63,7 @@
   补 17 项后端端到端测试与契约校验工具；本地 CPU 实测通过。
 - 2026-11-04：实现提交 `148be2e` 已推送并核对远端一致，创建 Issue #7 与 PR #8（base `codex/ship-tiled-inference`）。
   上传与合并/部署分别记录：未合并、未部署、未做浏览器联调。
+- 2026-11-04（优化轮）：修三处缺陷（改几何自动 `modified`、分片累计上限、过期上传/旧结果回收）；
+  片级让锁、`/vision/*` 内存直推、tiled 输入快检、模型预热、ETag/304、请求 ID、队列限流、`fsck` 对账。
+  测试 41 项通过，契约 21/21 + 6/6；实测 `/vision/detect` 80 ms（GPU，模型已加载）、预览条件请求 304。
+  行为变化：tiled 输入变化改为 `size/mtime` 快检（README 已记录边界）。仍未合并、未部署。

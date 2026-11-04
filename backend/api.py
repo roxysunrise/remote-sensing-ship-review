@@ -12,8 +12,8 @@ import math
 import threading
 from pathlib import Path
 
-from fastapi import APIRouter, Body, Depends, Header, Query
-from fastapi.responses import FileResponse
+from fastapi import APIRouter, Body, Depends, Header, Query, Request
+from fastapi.responses import FileResponse, Response
 
 from algorithm.errors import DetectionError
 
@@ -142,15 +142,28 @@ def _version_payload(row, *, with_detections: bool = False) -> dict:
     return payload
 
 
+def _conditional_file(path: Path, request: Request, *, etag: str,
+                      media_type: str | None = None, filename: str | None = None) -> Response:
+    """私有文件响应，带 ETag：命中 `If-None-Match` 直接 304，省掉重复传输。"""
+    tag = f'"{etag}"'
+    headers = {"ETag": tag, "Cache-Control": "private, max-age=3600"}
+    if request.headers.get("if-none-match") == tag:
+        return Response(status_code=304, headers=headers)
+    return FileResponse(path, media_type=media_type, filename=filename, headers=headers)
+
+
 # --------------------------------------------------------------------------
 # 运维与鉴权
 # --------------------------------------------------------------------------
 
 @router.get("/health")
 def health() -> dict:
+    active = db.one(
+        "SELECT COUNT(*) AS n FROM tasks WHERE status IN ('queued','running','merging')"
+    )["n"]
     return {"status": "degraded" if detector.service.last_error else "ok", "mode": "http",
             "version": __import__("backend").__version__,
-            "model_loaded": detector.service.loaded}
+            "model_ready": detector.service.loaded, "active_tasks": active}
 
 
 @router.post("/auth/login")
@@ -311,6 +324,11 @@ def put_chunk(upload_id: str, index: int, payload: bytes = Body(...),
                               f"分片必须按顺序提交，当前应提交第 {row['chunks_received']} 片")
     if not payload:
         raise errors.invalid("INVALID_ARGUMENT", "分片内容为空")
+    if len(payload) > config.CHUNK_SIZE:
+        raise errors.invalid("INVALID_ARGUMENT", f"单个分片不得超过 {config.CHUNK_SIZE} 字节")
+    # 上限按"已收分片数 × 分片大小"估算，避免客户端谎报 size 无限刷盘
+    if (row["chunks_received"] + 1) * config.CHUNK_SIZE > config.MAX_UPLOAD_BYTES:
+        raise errors.too_large("FILE_TOO_LARGE", "超出允许的上传大小")
 
     store.write_chunk(upload_id, index, payload)
     received = row["chunks_received"] + 1
@@ -354,7 +372,7 @@ def get_image(image_id: str, state: dict = State) -> dict:
 
 
 @router.get("/files/{image_id}")
-def get_file(image_id: str, state: dict = State) -> FileResponse:
+def get_file(image_id: str, request: Request, state: dict = State) -> Response:
     row = db.one("SELECT * FROM images WHERE id=?", (image_id,))
     if row is None:
         raise errors.not_found("IMAGE_NOT_FOUND", "影像不存在")
@@ -362,11 +380,11 @@ def get_file(image_id: str, state: dict = State) -> FileResponse:
     path = storage.blob_path(row["stored_name"])
     if not path.is_file():
         raise errors.not_found("IMAGE_NOT_FOUND", "影像文件缺失")
-    return FileResponse(path, filename=row["file_name"])
+    return _conditional_file(path, request, etag=row["sha256"], filename=row["file_name"])
 
 
 @router.get("/previews/{image_id}")
-def get_preview(image_id: str, state: dict = State) -> FileResponse:
+def get_preview(image_id: str, request: Request, state: dict = State) -> Response:
     row = db.one("SELECT * FROM images WHERE id=?", (image_id,))
     if row is None:
         raise errors.not_found("IMAGE_NOT_FOUND", "影像不存在")
@@ -374,7 +392,9 @@ def get_preview(image_id: str, state: dict = State) -> FileResponse:
     path = storage.preview_path(image_id)
     if not path.is_file():
         raise errors.not_found("IMAGE_NOT_FOUND", "预览尚未生成")
-    return FileResponse(path, media_type="image/jpeg")
+    stat = path.stat()
+    return _conditional_file(path, request, media_type="image/jpeg",
+                             etag=f"{row['sha256']}-{stat.st_size}-{stat.st_mtime_ns}")
 
 
 # --------------------------------------------------------------------------
@@ -393,6 +413,17 @@ def create_task(project_id: str, body: dict = Body(...), state: dict = State) ->
 
     parameters = dict(config.DEFAULT_PARAMETERS)
     parameters.update({k: v for k, v in (body.get("parameters") or {}).items() if v is not None})
+
+    active = db.one(
+        "SELECT COUNT(*) AS n FROM tasks WHERE project_id=? AND status IN ('queued','running','merging')",
+        (project_id,),
+    )["n"]
+    if active >= config.MAX_ACTIVE_TASKS:
+        raise errors.ApiError(429, "RATE_LIMITED",
+                              f"该项目已有 {active} 个任务在排队或运行，请等当前任务结束后再建")
+    waiting = db.one("SELECT COUNT(*) AS n FROM tasks WHERE status='queued'")["n"]
+    if waiting >= config.MAX_QUEUE_LENGTH:
+        raise errors.ApiError(429, "RATE_LIMITED", "计算队列已满，请稍后再试")
 
     task_id = db.new_id("tsk")
     db.execute(
@@ -516,12 +547,14 @@ def patch_detection(task_id: str, detection_id: int, body: dict = Body(...),
         except DetectionError as exc:
             raise errors.from_detection_error(exc) from exc
 
+    if polygon is not None and review_state is None:
+        # 改了几何就自动进入"已修改"，否则复核统计与版本摘要永远是 0
+        review_state = "modified"
+
     db.execute(
         "UPDATE draft_detections SET polygon=COALESCE(?,polygon), review_state=COALESCE(?,review_state),"
-        " note=COALESCE(?,note), origin=CASE WHEN origin='model' AND ? IS NOT NULL THEN 'model'"
-        " ELSE origin END WHERE task_id=? AND detection_id=?",
-        (json.dumps(polygon) if polygon else None, review_state, note,
-         json.dumps(polygon) if polygon else None, task_id, detection_id),
+        " note=COALESCE(?,note) WHERE task_id=? AND detection_id=?",
+        (json.dumps(polygon) if polygon else None, review_state, note, task_id, detection_id),
     )
     db.execute("UPDATE draft_state SET updated_at=? WHERE task_id=?", (db.now(), task_id))
     return _detection_payload(db.one(

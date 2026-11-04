@@ -47,23 +47,41 @@ class DetectorService:
         detector = self.load()
         params = {k: parameters[k] for k in _tiling_keys if k in parameters}
         tiling = bool(parameters.get("tiling", True))
-        with self._run_lock:
-            try:
-                if tiling:
-                    return detector.predict_large(
-                        image_path,
-                        tile_size=int(params.get("tile_size", 1024)),
-                        stride=int(params.get("stride", 512)),
-                        merge_iou=float(params.get("merge_iou", 0.1)),
-                        conf=float(params.get("conf", 0.25)),
-                        iou=float(params.get("iou", 0.7)),
-                        imgsz=int(params.get("imgsz", 1024)),
-                        max_det=int(params.get("max_det", 1000)),
-                        on_progress=on_progress,
-                        should_cancel=should_cancel,
-                    )
+        try:
+            if tiling:
+                # 锁下沉到单片：任务跑着的时候，即时检测仍能在片间插队
+                return detector.predict_large(
+                    image_path,
+                    tile_size=int(params.get("tile_size", 1024)),
+                    stride=int(params.get("stride", 512)),
+                    merge_iou=float(params.get("merge_iou", 0.1)),
+                    conf=float(params.get("conf", 0.25)),
+                    iou=float(params.get("iou", 0.7)),
+                    imgsz=int(params.get("imgsz", 1024)),
+                    max_det=int(params.get("max_det", 1000)),
+                    on_progress=on_progress,
+                    should_cancel=should_cancel,
+                    tile_lock=self._run_lock,
+                )
+            with self._run_lock:
                 return detector.predict(
                     image_path,
+                    conf=float(params.get("conf", 0.25)),
+                    iou=float(params.get("iou", 0.7)),
+                    imgsz=int(params.get("imgsz", 1024)),
+                    max_det=int(params.get("max_det", 1000)),
+                )
+        except DetectionError as exc:
+            raise errors.from_detection_error(exc) from exc
+
+    def predict_image(self, image, parameters: dict) -> dict:
+        """内存图像推理：省掉写盘、二次解码与哈希。"""
+        detector = self.load()
+        params = {k: parameters[k] for k in _tiling_keys if k in parameters}
+        with self._run_lock:
+            try:
+                return detector.predict_image(
+                    image,
                     conf=float(params.get("conf", 0.25)),
                     iou=float(params.get("iou", 0.7)),
                     imgsz=int(params.get("imgsz", 1024)),

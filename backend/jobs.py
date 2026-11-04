@@ -15,7 +15,7 @@ from pathlib import Path
 from algorithm.errors import DetectionError
 from algorithm.tiled_inference import plan_tiles
 
-from . import db, detector, errors, storage
+from . import config, db, detector, errors, storage
 
 TERMINAL = {"done", "failed", "cancelled"}
 
@@ -136,6 +136,10 @@ class TaskRuntime:
             (payload["count"], payload["count"], str(target), db.now(), task_id, attempt),
         )
         self._ensure_v0(task_id, payload, actor=row["created_by"])
+        # 旧 attempt 的结果文件可重算，不必长期占用磁盘
+        for stale in config.RESULT_DIR.glob(f"{task_id}_a*.json"):
+            if not stale.name.endswith(f"_a{attempt}.json"):
+                stale.unlink(missing_ok=True)
         db.log_event("task.done", project_id=row["project_id"], user_id=row["created_by"],
                      target=task_id, detail={"count": payload["count"], "attempt": attempt})
 

@@ -53,7 +53,10 @@ $env:SHIP_SEED_PASSWORD = "..."; $env:SHIP_SEED_ON_START = "0"   # 已有库时�
 | `SHIP_CHUNK_SIZE` | 1 MiB | 上传分片大小 |
 | `SHIP_MAX_UPLOAD_BYTES` | 256 MiB | 单文件上限 |
 | `SHIP_MAX_PIXELS` | 67,108,864 | 解码后像素上限（与 v0.2 一致） |
-| `SHIP_SESSION_TTL_HOURS` | 168 | 会话有效期 |
+| `SHIP_UPLOAD_TTL_HOURS` | 24 | 上传会话保留时间，过期后启动清理标记 `expired` |
+| `SHIP_MAX_ACTIVE_TASKS` | 2 | 单项目同时排队/运行的任务上限，超出返回 429 |
+| `SHIP_MAX_QUEUE_LENGTH` | 20 | 全局排队长度上限 |
+| `SHIP_PRELOAD` | 0 | 设为 `1` 时启动后台预加载模型，首个交互不用等加载 |
 | `SHIP_CORS_ORIGINS` | 本地 8765 | 允许的前端源 |
 
 `var/` 已在 `.gitignore` 中，不会入库。
@@ -62,18 +65,20 @@ $env:SHIP_SEED_PASSWORD = "..."; $env:SHIP_SEED_ON_START = "0"   # 已有库时�
 
 ```
 backend/
-  server.py      ASGI 入口：错误信封、CORS、启动初始化、重启恢复
+  server.py      ASGI 入口：错误信封、CORS、请求 ID、启动清理与预加载、重启恢复
   api.py         业务 29 端点：鉴权/项目/上传/影像/任务/草稿/版本/复核/区域/导出/AI候选
-  vision.py      /vision/* 5 端点：把检测工作台接到真实模型，并做坐标还原
+  vision.py      /vision/* 5 端点：内存直推（不落盘）、坐标还原
   jobs.py        任务状态机与 Worker：逐片进度、取消边界、重试、重启恢复
-  detector.py    算法适配：单例模型 + 串行推理锁 + 参数透传
+  detector.py    算法适配：单例模型 + 片级让锁 + 参数透传 + 内存推理入口
   storage.py     私有文件存储、分片合并、SHA-256
   imaging.py     解码校验、预览生成、请求体图像解码
   geometry.py    复核原因、抽样网格、区域计数（复用 algorithm 的几何）
   security.py    口令哈希、会话令牌、登录限速
+  maintenance.py 启动清理：过期上传、旧尝试产物、残留临时文件
   db.py          SQLite schema 与访问
   errors.py      错误码 → HTTP 映射，且清洗绝对路径
   tools/check_contract.py  拿真实响应核对前端 OpenAPI
+  tools/fsck.py            数据库 ↔ 文件对账（--delete 清孤立文件）
 ```
 
 关键边界：**业务数据库是唯一写入口**。Worker 只把检测产物写到 `var/results/`，
@@ -100,19 +105,36 @@ backend/
 （上限 2048）。但前端仍会把整图缩到 1600 再 JPEG 有损编码，这部分精度损失在客户端，
 需要前端调整 `maxPayloadEdge` 才能消除。
 
-## 5. 验证（可复现）
+## 5. 工程化能力（2026-11-04 优化）
+
+| 能力 | 说明 |
+|---|---|
+| 片级让锁 | Tiled 任务只在**单片推理**时持锁，片间让出 GPU，即时检测不再被大图任务堵死 |
+| 内存直推 | `/vision/*` 不再写临时文件再读回，直接对已解码图像推理（省一次落盘 + 一次解码 + 一次哈希） |
+| 输入变化快检 | tiled 入口先比 `size/mtime`，只有变化才回退全量 SHA-256；未变化时只算一次 |
+| 模型预热 | `SHIP_PRELOAD=1` 启动后台加载；`/health` 暴露 `model_ready` 与 `active_tasks` |
+| 条件请求 | `/files`、`/previews` 带 `ETag` + `Cache-Control: private, max-age=3600`，命中 `If-None-Match` 返回 304 |
+| 请求 ID | 每个响应带 `X-Request-Id`，错误信封 `details.request_id` 可对日志 |
+| 队列治理 | 单项目并发上限与全局排队上限，超出返回 `429 RATE_LIMITED` |
+| 启动清理 | 过期上传标记 `expired` 并删分片；旧 attempt 结果文件与残留临时文件回收 |
+| 对账工具 | `python -m backend.tools.fsck [--delete]`：数据库 ↔ 文件一致性检查 |
+
+## 6. 验证（可复现）
 
 ```powershell
-# 单元 + 端到端（有 best.pt 时跑真实推理，无权重自动跳过 3 项）
+# 单元 + 端到端（有 best.pt 时跑真实推理，无权重自动跳过真实推理用例）
 & .venv/Scripts/python.exe -m unittest discover -s tests -v
 
 # 契约一致性：拿真实响应核对前端 OpenAPI（需后端已启动、frontend/ 已存在）
 & .venv/Scripts/python.exe -m backend.tools.check_contract --base-url http://127.0.0.1:8000
+
+# 数据库与文件对账
+& .venv/Scripts/python.exe -m backend.tools.fsck
 ```
 
 最近一次结果见 [`docs/validation/backend-2026-11-04.md`](../docs/validation/backend-2026-11-04.md)。
 
-## 6. 已知限制
+## 7. 已知限制
 
 1. **单进程单 Worker**：任务队列在内存里，多进程部署会各自消费；GPU 只能串行，没有分布式调度。
 2. **重启恢复 = 如实失败**：进程重启后未完成任务标记 `SERVER_RESTART`，不假装继续，也不支持断点续算。
@@ -120,10 +142,10 @@ backend/
 4. **无并发编辑冲突检测**：版本提交是整份快照，两人同时改会以最后一次提交为准（契约里明确列为后续增强）。
 5. **AI 候选不是语义分割**：目前是"局部高分辨率检测 + 阈值轮廓兜底"，没有 SAM 类模型；验收时不能按分割质量评估。
 6. **导出为同步生成**：放到后台线程但没有断点；大图 PNG 渲染走预览图（最长边 2048），不是原分辨率。
-7. **未做配额与限流**（除登录失败限速）。
-8. **未做备份恢复演练**，`var/` 与 SQLite 的一致性未做故障注入。
+7. **输入变化检测的边界**：靠 `size/mtime` 快检，若有人改写内容又原样恢复 mtime，则不会被发现（威胁模型外）。
+8. **未做备份恢复演练**；`fsck` 能查一致性，但不等于恢复演练。
 
-## 7. 与前端的两处契约差异（已在实现中兼容）
+## 8. 与前端的两处契约差异（已在实现中兼容）
 
 - `DetectResponse.frame` 的 schema 要求 `index/time_ms/width/height` 四个字段，而
   `DETECT_API.md` 的示例只写了前两个；后端按 **schema** 输出四个字段。

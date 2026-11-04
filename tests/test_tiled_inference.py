@@ -130,13 +130,24 @@ class TiledTests(unittest.TestCase):
             self.assertEqual(error.exception.code, "IMAGE_TOO_LARGE")
 
     def test_input_changed_during_inference(self):
+        """输入改动可被发现：先比 size/mtime，命中变化才回退到全量哈希。"""
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder) / "small.png"
             Image.new("RGB", (32, 32)).save(path)
-            with patch("algorithm.tiled_inference.sha256", side_effect=["old", "new"]):
+            with patch("algorithm.tiled_inference.sha256", side_effect=["old", "new"]), \
+                    patch("algorithm.tiled_inference._input_stamp", side_effect=[(10, 1), (10, 2)]):
                 with self.assertRaises(DetectionError) as error:
                     ScriptedDetector([[]]).predict_large(path)
             self.assertEqual(error.exception.code, "IMAGE_CHANGED")
+
+    def test_unchanged_input_hashes_only_once(self):
+        """文件没变时不应再算第二次全量哈希——这是本轮的 IO 优化点。"""
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "small.png"
+            Image.new("RGB", (32, 32)).save(path)
+            with patch("algorithm.tiled_inference.sha256", return_value="fingerprint") as spy:
+                ScriptedDetector([[]]).predict_large(path)
+            self.assertEqual(spy.call_count, 1)
 
     def test_mid_job_failure_returns_no_partial_success(self):
         class FailingDetector(ScriptedDetector):

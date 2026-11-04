@@ -25,6 +25,8 @@ os.environ["SHIP_VAR_DIR"] = TMP
 os.environ["SHIP_DB_PATH"] = str(Path(TMP) / "test.db")
 os.environ["SHIP_DEVICE"] = "cpu"
 os.environ["SHIP_SEED_PASSWORD"] = "test-password-1234"
+os.environ.setdefault("SHIP_MAX_ACTIVE_TASKS", "1")
+os.environ.setdefault("SHIP_CHUNK_SIZE", "65536")
 os.environ.setdefault("SHIP_WEIGHTS", str(ROOT / "models/yolov8l-obb-dota-v1-80e/best.pt"))
 sys.path.insert(0, str(ROOT))
 
@@ -32,7 +34,7 @@ from fastapi.testclient import TestClient  # noqa: E402
 from PIL import Image, ImageDraw  # noqa: E402
 
 from algorithm.tiled_inference import plan_tiles  # noqa: E402
-from backend import config  # noqa: E402
+from backend import config, db  # noqa: E402
 from backend.server import app  # noqa: E402
 
 WEIGHTS = Path(os.environ["SHIP_WEIGHTS"])
@@ -192,9 +194,18 @@ class BackendTests(unittest.TestCase):
         self.assertEqual(response.status_code, 404)
         self.assertEqual(created["status"], "uploading")
 
+    def _wait_idle(self, timeout: float = 180) -> None:
+        """等队列清空，避免上一个用例遗留的任务触发并发上限。"""
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            if self.client.get("/health", headers=self.headers).json().get("active_tasks", 0) == 0:
+                return
+            time.sleep(0.2)
+
     # --- 任务（真实推理） -------------------------------------------------
     @unittest.skipUnless(HAS_WEIGHTS, "缺少本地权重 best.pt，跳过真实推理用例")
     def test_task_lifecycle_end_to_end(self):
+        self._wait_idle()
         state = self._upload(_image_bytes(), "task.png")
         self.assertEqual(state["status"], "ready")
         image_id = state["image_id"]
@@ -246,6 +257,14 @@ class BackendTests(unittest.TestCase):
         }, headers=self.headers)
         self.assertEqual(added.status_code, 201, added.text)
         self.assertIsNone(added.json()["confidence"])
+
+        # 只改几何、不传状态 → 服务端应自动标记为"已修改"
+        moved = self.client.patch(
+            f"/tasks/{task_id}/draft/detections/{added.json()['id']}",
+            json={"polygon": [[12, 12], [62, 12], [62, 42], [12, 42]]}, headers=self.headers)
+        self.assertEqual(moved.status_code, 200, moved.text)
+        self.assertEqual(moved.json()["review_state"], "modified")
+
         committed = self.client.post(f"/tasks/{task_id}/versions",
                                      json={"label": "人工修订"}, headers=self.headers)
         self.assertEqual(committed.status_code, 201, committed.text)
@@ -368,6 +387,89 @@ class BackendTests(unittest.TestCase):
         self.assertTrue(created.json()["session_id"].startswith("ses_"))
         cancelled = self.client.post("/vision/jobs/any/cancel", json={})
         self.assertTrue(cancelled.json()["cancelled"])
+
+
+    # --- 本轮优化：限流、缓存、维护 ---
+    def test_chunk_larger_than_chunk_size_rejected(self):
+        created = self.client.post("/projects/harbor-a/uploads",
+                                   json={"file_name": "big.png", "size": 200},
+                                   headers=self.headers).json()
+        oversize = b"x" * (config.CHUNK_SIZE + 1)
+        response = self.client.put(f"/uploads/{created['id']}/chunks/0", content=oversize,
+                                   headers={**self.headers,
+                                            "Content-Type": "application/octet-stream"})
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(response.json()["error"]["code"], "INVALID_ARGUMENT")
+
+    def test_task_quota_returns_429(self):
+        self._wait_idle()
+        state = self._upload(_image_bytes((640, 480)), "quota.png")
+        params = {"tiling": True, "tile_size": 128, "stride": 64, "imgsz": 128}
+        first = self.client.post("/projects/harbor-a/tasks",
+                                 json={"image_id": state["image_id"], "parameters": params},
+                                 headers=self.headers)
+        self.assertEqual(first.status_code, 201, first.text)
+        second = self.client.post("/projects/harbor-a/tasks",
+                                  json={"image_id": state["image_id"], "parameters": params},
+                                  headers=self.headers)
+        self.assertEqual(second.status_code, 429, second.text)
+        self.assertEqual(second.json()["error"]["code"], "RATE_LIMITED")
+        self.client.post(f"/tasks/{first.json()['id']}/cancel", headers=self.headers)
+
+    def test_preview_etag_and_304(self):
+        state = self._upload(_image_bytes((64, 48)), "etag.png")
+        first = self.client.get(f"/previews/{state['image_id']}", headers=self.headers)
+        self.assertEqual(first.status_code, 200)
+        etag = first.headers.get("etag")
+        self.assertTrue(etag)
+        second = self.client.get(f"/previews/{state['image_id']}",
+                                 headers={**self.headers, "If-None-Match": etag})
+        self.assertEqual(second.status_code, 304)
+
+    def test_request_id_header_and_error_details(self):
+        ok = self.client.get("/health")
+        self.assertTrue(ok.headers.get("x-request-id", "").startswith("req_"))
+        denied = self.client.get("/projects")
+        self.assertEqual(denied.status_code, 401)
+        self.assertTrue(denied.json()["error"]["details"].get("request_id"))
+
+    def test_maintenance_purges_expired_uploads_and_stale_results(self):
+        from backend import maintenance
+
+        expired = self.client.post("/projects/harbor-a/uploads",
+                                   json={"file_name": "expired.png", "size": 10},
+                                   headers=self.headers).json()
+        db.execute("UPDATE uploads SET expires_at=? WHERE id=?",
+                   ("2000-01-01T00:00:00+00:00", expired["id"]))
+        self.assertGreaterEqual(maintenance.purge_expired_uploads(), 1)
+        self.assertEqual(db.one("SELECT status FROM uploads WHERE id=?", (expired["id"],))["status"],
+                         "expired")
+
+        # 造一个"重试过"的任务：attempt=2，磁盘上还留着 a1 的旧结果
+        task_id = "tsk_prune_probe"
+        current = config.RESULT_DIR / f"{task_id}_a2.json"
+        stale = config.RESULT_DIR / f"{task_id}_a1.json"
+        config.RESULT_DIR.mkdir(parents=True, exist_ok=True)
+        current.write_text("{}", encoding="utf-8")
+        stale.write_text("{}", encoding="utf-8")
+        db.execute(
+            "INSERT OR REPLACE INTO tasks(id,project_id,image_id,created_by,status,attempt,"
+            "tiles_total,tiles_done,temp_count,parameters,cancel_requested,result_path,created_at)"
+            " VALUES(?,?,?,?,'done',2,0,0,0,'{}',0,?,?)",
+            (task_id, "harbor-a", "img_probe", "usr_owner", str(current), db.now()))
+        self.assertGreaterEqual(maintenance.prune_result_files(), 1)
+        self.assertFalse(stale.exists())
+        self.assertTrue(current.exists())
+
+    def test_fsck_reports_and_cleans_orphans(self):
+        from backend.tools import fsck
+
+        orphan = config.BLOB_DIR / "orphan_test.png"
+        orphan.write_bytes(b"not really a png")
+        report = fsck.scan()
+        self.assertIn("orphan_test.png", report["orphaned"]["blobs"])
+        fsck.cleanup(report)
+        self.assertFalse(orphan.exists())
 
 
 if __name__ == "__main__":

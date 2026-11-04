@@ -31,13 +31,9 @@ def _align(value: int, low: int = 32, high: int = 2048) -> int:
     return max(low, min(high, int(math.ceil(value / 32.0) * 32)))
 
 
-def _request_image(payload: dict) -> tuple[Image.Image, Path]:
+def _request_image(payload: dict) -> Image.Image:
     image_bytes = imaging.decode_data_url(((payload or {}).get("image") or {}).get("data_url"))
-    image = imaging.load_request_image(image_bytes)
-    tmp = config.TMP_DIR / f"vision_{secrets.token_hex(8)}.jpg"
-    tmp.parent.mkdir(parents=True, exist_ok=True)
-    tmp.write_bytes(image_bytes)
-    return image, tmp
+    return imaging.load_request_image(image_bytes)
 
 
 def _scale_back(polygon, source_width: int, source_height: int, frame: dict) -> list[list[float]]:
@@ -74,7 +70,7 @@ def detect(payload: dict = Body(default_factory=dict)) -> dict:
     frame = payload.get("frame") or {}
     options = payload.get("options") or {}
 
-    image, tmp = _request_image(payload)
+    image = _request_image(payload)
     started = time.perf_counter()
     try:
         params = {
@@ -85,13 +81,9 @@ def detect(payload: dict = Body(default_factory=dict)) -> dict:
             "imgsz": _align(max(image.width, image.height)),
             "max_det": int(options.get("max_det", 200)),
         }
-        result = detector.service.predict(tmp, params)
+        result = detector.service.predict_image(image, params)
     finally:
         image.close()
-        try:
-            tmp.unlink()
-        except OSError:
-            pass
 
     elapsed_ms = round((time.perf_counter() - started) * 1000, 2)
     return _finish_detect(result, frame, request_id, elapsed_ms)
@@ -138,7 +130,7 @@ def segment(payload: dict = Body(default_factory=dict)) -> dict:
     roi = payload.get("roi")
     point = payload.get("point")
 
-    image, tmp = _request_image(payload)
+    image = _request_image(payload)
     started = time.perf_counter()
     try:
         width, height = image.size
@@ -166,28 +158,10 @@ def segment(payload: dict = Body(default_factory=dict)) -> dict:
             raise errors.invalid("INVALID_REGION", "选区太小，请重新框选")
 
         crop = image.crop((left, top, right, bottom))
-        crop_path = config.TMP_DIR / f"segment_{secrets.token_hex(8)}.png"
-        crop.save(crop_path)
-        candidates = []
         try:
-            params = {"tiling": False, "conf": 0.15, "iou": 0.7,
-                      "imgsz": _align(max(crop.size), low=32, high=1024), "max_det": 10}
-            result = detector.service.predict(crop_path, params)
-            for det in sorted(result["detections"], key=lambda d: -float(d["confidence"]))[:2]:
-                polygon = [[(x + left) / sx, (y + top) / sy] for x, y in det["polygon"]]
-                candidates.append({"polygon": _round_polygon(polygon),
-                                   "quality": round(float(det["confidence"]), 4),
-                                   "reason": "局部高分辨率检测命中"})
+            candidates = _roi_candidates(crop, left, top, sx, sy)
         finally:
-            try:
-                crop_path.unlink()
-            except OSError:
-                pass
-
-        if not candidates:
-            fallback = _contour_candidate(crop, left, top, sx, sy)
-            if fallback:
-                candidates.append(fallback)
+            crop.close()
 
         if not candidates:
             raise errors.invalid("NO_CANDIDATE", "该区域没有可用候选，请改用手动标注")
@@ -208,10 +182,24 @@ def segment(payload: dict = Body(default_factory=dict)) -> dict:
         }
     finally:
         image.close()
-        try:
-            tmp.unlink()
-        except OSError:
-            pass
+
+
+def _roi_candidates(crop: Image.Image, left: int, top: int, sx: float, sy: float) -> list[dict]:
+    """先在 ROI 上跑真实模型，没命中再退化为经典轮廓。"""
+    candidates: list[dict] = []
+    params = {"tiling": False, "conf": 0.15, "iou": 0.7,
+              "imgsz": _align(max(crop.size), low=32, high=1024), "max_det": 10}
+    result = detector.service.predict_image(crop, params)
+    for det in sorted(result["detections"], key=lambda d: -float(d["confidence"]))[:2]:
+        polygon = [[(x + left) / sx, (y + top) / sy] for x, y in det["polygon"]]
+        candidates.append({"polygon": _round_polygon(polygon),
+                           "quality": round(float(det["confidence"]), 4),
+                           "reason": "局部高分辨率检测命中"})
+    if not candidates:
+        fallback = _contour_candidate(crop, left, top, sx, sy)
+        if fallback:
+            candidates.append(fallback)
+    return candidates
 
 
 def _round_polygon(points) -> list[list[float]]:
