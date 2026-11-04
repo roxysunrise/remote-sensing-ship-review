@@ -1,11 +1,3 @@
-/* 登录页逻辑：只调用真实后端，不包含任何 mock 账号。
- *
- * 流程：
- *   1. 有本地会话 → GET /me 校验 → 直接进入工作台
- *   2. 提交 → POST /auth/login → 保存 token/user → 跳转 index.html
- *
- * 依赖：config.js（APP_CONFIG）、auth-config.js（AUTH_CONFIG）、auth-session.js
- */
 'use strict';
 
 (function () {
@@ -36,16 +28,12 @@
     alert: $('#alert'),
     alertMsg: $('#alert-msg'),
     alertCode: $('#alert-code'),
-    health: $('#health'),
-    endpoint: $('#endpoint'),
     caps: $('#caps'),
     reveal: $('#toggle-pass')
   };
 
   let busy = false;
   let composing = false;
-
-  /* ------------------------------------------------------------------ 请求 */
 
   class AuthError extends Error {
     constructor(status, code, message, details) {
@@ -59,11 +47,6 @@
 
   function apiUrl(path) {
     return BASE + PREFIX + path;
-  }
-
-  function prettyEndpoint() {
-    const raw = apiUrl('');
-    return raw.replace(/^https?:\/\//, '') || raw;
   }
 
   async function request(method, path, body, token) {
@@ -110,8 +93,6 @@
     return data;
   }
 
-  /* ------------------------------------------------------------------ 界面 */
-
   function showAlert(tone, message, code) {
     el.alert.hidden = false;
     el.alert.dataset.tone = tone || 'error';
@@ -154,14 +135,6 @@
     el.submitLabel.textContent = on ? (label || '正在登录…') : '登录';
   }
 
-  function setHealth(state, text) {
-    el.health.classList.remove('ok', 'bad');
-    if (state === 'ok') el.health.classList.add('ok');
-    if (state === 'bad') el.health.classList.add('bad');
-    const label = el.health.querySelector('span');
-    if (label) label.textContent = text;
-  }
-
   function fillProjects() {
     if (!el.projectList) return;
     el.projectList.innerHTML = '';
@@ -183,10 +156,8 @@
   }
 
   function safeSet(key, value) {
-    try { value ? localStorage.setItem(key, value) : localStorage.removeItem(key); } catch (_) { /* 隐私模式忽略 */ }
+    try { value ? localStorage.setItem(key, value) : localStorage.removeItem(key); } catch (_) {  }
   }
-
-  /* ------------------------------------------------------------------ 校验 */
 
   function validateUser() {
     const value = el.user.value.trim();
@@ -215,8 +186,6 @@
     return !message;
   }
 
-  /* ------------------------------------------------------------------ 跳转 */
-
   function nextUrl() {
     const raw = new URLSearchParams(location.search).get('next');
     if (!raw) return APP_URL;
@@ -234,8 +203,6 @@
   function enterApp() {
     location.replace(nextUrl());
   }
-
-  /* ------------------------------------------------------------------ 登录 */
 
   function handleLoginError(err) {
     const status = err.status || 0;
@@ -269,8 +236,7 @@
       message = err.message || '登录请求格式不正确。';
     }
 
-    const detail = [status || '', code].filter(Boolean).join(' · ') +
-      (status === 0 ? ' · ' + prettyEndpoint() : '');
+    const detail = [status || '', code].filter(Boolean).join(' · ');
     showAlert('error', message, detail);
 
     if (focus) {
@@ -324,7 +290,6 @@
       el.submit.classList.add('ok');
       el.submitLabel.textContent = '登录成功，正在进入…';
 
-      // 留出最短反馈时间，避免闪一下就跳走
       const elapsed = performance.now() - started;
       if (elapsed < 320) await new Promise(resolve => setTimeout(resolve, 320 - elapsed));
 
@@ -334,8 +299,6 @@
       handleLoginError(err instanceof AuthError ? err : new AuthError(0, 'UNKNOWN', String(err && err.message || err)));
     }
   }
-
-  /* ------------------------------------------------------------------ 会话恢复 */
 
   async function restoreSession() {
     if (!S) return;
@@ -370,7 +333,7 @@
         S.clear();
         showAlert('info', '当前账号已无权访问该项目，请重新登录。', 'PROJECT_FORBIDDEN');
       } else if (err.status === 0) {
-        // 后端暂时不可达：保留会话，允许手工重试
+
         showAlert('info', '暂时无法校验已有登录状态，可以重新登录。', err.code || 'NETWORK_ERROR');
       } else {
         S.clear();
@@ -378,30 +341,6 @@
       }
     }
   }
-
-  async function checkHealth() {
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), Math.min(TIMEOUT, 5000));
-    try {
-      const res = await fetch(apiUrl('/health'), {
-        headers: { Accept: 'application/json' },
-        signal: ctrl.signal,
-        credentials: 'same-origin',
-        mode: 'cors'
-      });
-      if (!res.ok) throw new Error('HTTP ' + res.status);
-      let data = null;
-      try { data = await res.json(); } catch (_) { data = null; }
-      const degraded = data && data.status === 'degraded';
-      setHealth(degraded ? '' : 'ok', degraded ? '后端降级运行' : '后端可用');
-    } catch (_) {
-      setHealth('bad', '后端不可达');
-    } finally {
-      clearTimeout(timer);
-    }
-  }
-
-  /* ------------------------------------------------------------------ 绑定 */
 
   function bind() {
     el.form.addEventListener('submit', onSubmit);
@@ -430,7 +369,6 @@
       el.pass.focus();
     });
 
-    // 从工作台退出后按浏览器「后退」：恢复表单可用状态
     window.addEventListener('pageshow', event => {
       if (!event.persisted) return;
       setBusy(false);
@@ -440,10 +378,6 @@
   }
 
   function init() {
-    const endpoint = prettyEndpoint();
-    el.endpoint.textContent = endpoint;
-    el.endpoint.title = apiUrl('');
-
     if (!S) {
       showAlert('error', '会话模块未加载，无法登录。请检查 auth-session.js。', 'AUTH_SESSION_MISSING');
       setBusy(true, '无法登录');
@@ -457,12 +391,11 @@
       const query = params.toString();
       try {
         history.replaceState(null, '', location.pathname + (query ? '?' + query : '') + location.hash);
-      } catch (_) { /* file:// 下可能受限 */ }
+      } catch (_) {  }
     }
 
     fillProjects();
     bind();
-    checkHealth();
 
     const lastUser = safeGet(S.LAST_USER_KEY);
     if (lastUser) {

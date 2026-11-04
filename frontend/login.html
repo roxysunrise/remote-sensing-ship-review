@@ -5,42 +5,40 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="dark">
 <title>登录 · 遥感影像船舶检测与复核</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%2338b2a3'/%3E%3Cpath d='M6 20h20l-4 6H10z' fill='%230a0f14'/%3E%3Crect x='14' y='7' width='4' height='12' fill='%230a0f14'/%3E%3C/svg%3E">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23ff6b57'/%3E%3Cpath d='M6 20h20l-4 6H10z' fill='%23071320'/%3E%3Crect x='14' y='7' width='4' height='12' fill='%23071320'/%3E%3C/svg%3E">
 <link rel="preload" as="image" href="assets/harbor-login.webp">
 <link rel="stylesheet" href="login.css">
 </head>
 <body>
 
 <div class="scene" aria-hidden="true">
-  <img src="assets/harbor-login.webp" alt="" width="1600" height="1067" decoding="async">
+  <img src="assets/harbor-login.webp" alt="" width="1920" height="1440" decoding="async">
 </div>
 
-<div class="stage">
-  <main class="frame">
+<main class="split">
 
-    <section class="intro">
+  <section class="intro">
+    <div class="intro-copy">
+      <h1>让每一处检测<br><span>都有据可查</span></h1>
+      <p class="lede">
+        面向港口巡查的影像分析工作台。大图切片推理、旋转框人工复核、
+        版本留痕与区域统计，在同一条流程里完成。
+      </p>
+    </div>
+  </section>
+
+  <section class="panel" aria-labelledby="login-title">
+    <div class="channels" aria-hidden="true"><i></i><i></i><i></i></div>
+
+    <div class="panel-inner">
       <div class="brand">
         <span class="mark" aria-hidden="true">船</span>
         <span class="brand-text">遥感船舶检测与复核<small>ship-detection / 0.2</small></span>
       </div>
 
-      <div class="intro-copy">
-        <h1>让每一处检测<br>都有据可查</h1>
-        <p class="lede">
-          面向港口巡查的影像分析工作台。大图切片推理、旋转框人工复核、
-          版本留痕与区域统计，在同一条流程里完成。
-        </p>
-
-        <p class="traits">1024 px 切片推理 · OBB 旋转框复核 · v0→vN 版本留痕</p>
-      </div>
-
-      <p class="foot">私有部署 · 受控开户 · 无公开注册</p>
-    </section>
-
-    <section class="panel" aria-labelledby="login-title">
       <header class="panel-head">
         <h2 id="login-title">登录工作台</h2>
-        <p class="hint">使用管理员分配的账号进入项目。登录即绑定项目，跨项目访问会被拒绝。</p>
+        <p class="hint">使用管理员分配的账号进入项目空间。</p>
       </header>
 
       <div class="alert" id="alert" role="alert" hidden>
@@ -60,16 +58,26 @@
       <form id="login-form" novalidate autocomplete="on">
         <div class="field">
           <label for="username">账号</label>
-          <input id="username" name="username" type="text" autocomplete="username"
-                 spellcheck="false" autocapitalize="none" autocorrect="off"
-                 placeholder="如 roxysunrise" maxlength="64" required
-                 aria-describedby="err-user" autofocus>
+          <div class="control">
+            <svg class="field-icon" viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="12" cy="8" r="3.4" fill="none" stroke="currentColor" stroke-width="1.6"/>
+              <path d="M4.8 19.2c.6-3.6 3.4-5.4 7.2-5.4s6.6 1.8 7.2 5.4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+            </svg>
+            <input id="username" name="username" type="text" autocomplete="username"
+                   spellcheck="false" autocapitalize="none" autocorrect="off"
+                   placeholder="如 roxysunrise" maxlength="64" required
+                   aria-describedby="err-user" autofocus>
+          </div>
           <span class="field-err" id="err-user" role="alert"></span>
         </div>
 
         <div class="field">
           <label for="password">密码</label>
           <div class="control">
+            <svg class="field-icon" viewBox="0 0 24 24" aria-hidden="true">
+              <rect x="5" y="10" width="14" height="10" rx="2" fill="none" stroke="currentColor" stroke-width="1.6"/>
+              <path d="M8 10V7.8a4 4 0 0 1 8 0V10" fill="none" stroke="currentColor" stroke-width="1.6"/>
+            </svg>
             <input id="password" name="password" type="password" autocomplete="current-password"
                    placeholder="••••••••" required aria-describedby="err-pass">
             <button class="reveal" id="toggle-pass" type="button" aria-label="显示密码" aria-pressed="false">
@@ -86,12 +94,17 @@
 
         <div class="field">
           <label for="project">项目空间</label>
-          <input id="project" name="project" type="text" list="project-list" autocomplete="off"
-                 spellcheck="false" placeholder="项目编号，如 harbor-a" maxlength="64" required
-                 aria-describedby="err-project project-help">
-          <datalist id="project-list"></datalist>
+          <div class="control">
+            <svg class="field-icon" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="m12 3 8 4.5-8 4.5-8-4.5L12 3Z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>
+              <path d="m4 12 8 4.5 8-4.5M4 16.5 12 21l8-4.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>
+            </svg>
+            <input id="project" name="project" type="text" list="project-list" autocomplete="off"
+                   spellcheck="false" placeholder="如 harbor-a" maxlength="64" required
+                   aria-describedby="err-project">
+            <datalist id="project-list"></datalist>
+          </div>
           <span class="field-err" id="err-project" role="alert"></span>
-          <p class="help" id="project-help">项目编号由管理员提供；服务端按成员关系校验，不由前端授权。</p>
         </div>
 
         <label class="remember" for="remember">
@@ -103,19 +116,15 @@
         <button class="submit" id="submit" type="submit">
           <span class="spinner" aria-hidden="true"></span>
           <span class="label">登录</span>
+          <svg class="btn-arrow" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M5 12h13M12.5 6.5 19 12l-6.5 5.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
         </button>
-
-        <p class="secure">密码仅随本次请求发送，不会写入浏览器存储。</p>
       </form>
+    </div>
+  </section>
 
-      <footer class="panel-foot">
-        <span class="status" id="health"><i aria-hidden="true"></i><span>正在检测后端…</span></span>
-        <span class="endpoint" id="endpoint" title=""></span>
-      </footer>
-    </section>
-
-  </main>
-</div>
+</main>
 
 <noscript>
   <div class="noscript">本页需要启用 JavaScript 才能登录。</div>

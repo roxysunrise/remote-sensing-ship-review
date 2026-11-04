@@ -4,19 +4,31 @@
 `config.js` 的离线 mock 演示；真实后端模式下由本页负责登录与退出。
 
 - 入口：`login.html`
-- 规格：`api/openapi.yaml` 的 `/auth/login`、`/me`、`/auth/logout`、`/health`
+- 规格：`api/openapi.yaml` 的 `/auth/login`、`/me`、`/auth/logout`
 - 默认跳转：`index.html`（支持同源 `?next=` 回跳）
 
 ## 1. 文件
 
 | 文件 | 作用 |
 |---|---|
-| `login.html` | 页面结构：品牌区、登录表单、错误条、后端状态 |
-| `login.css` | 独立样式，沿用工作台的深色与青色强调色 |
+| `login.html` | 页面结构：品牌、登录表单、错误条、后端状态 |
+| `login.css` | 独立样式：码头影像表单面、海沫青标题、珊瑚红按钮 |
 | `login.js` | 登录、错误映射、会话恢复、回跳校验 |
 | `auth-session.js` | 登录页与工作台共用的会话存储（token + user） |
 | `auth-config.js` | 登录页配置：项目候选、回跳地址、超时、记住天数 |
-| `assets/harbor-login.webp` | 登录页背景（由 `harbor.png` 压缩，39 KB） |
+| `assets/harbor-login.webp` | 右侧背景：安特卫普港吊机日落，Unsplash / Wikimedia Commons，CC0 |
+| `assets/harbor-panel.webp` | 登录表单面背景：俯视集装箱码头，Unsplash / Wikimedia Commons，CC0 |
+
+### 视觉
+
+- 右侧照片来自 Wikimedia Commons，CC0，可自由使用；照片仅做裁切和压暗，未改动内容。
+- “登录工作台”表单面使用俯视集装箱码头照片作为背景：先裁成竖幅、压暗、轻微模糊，再叠加海玻璃绿 → 深梅的渐变。桌面端表单内容放在一块半透明深色卡面上，影像从卡片四周露出；窄屏卡片本身直接使用该影像背景。
+- 配色：海玻璃绿 `#0a2a2a`、深梅 `#221a28`、海沫青 `#7de8d8`（标题第二行、焦点与开关）、珊瑚红 `#ff7a66`（主按钮）、琥珀 `#ffc46b`（大写锁定提示）、暖沙 `#e8cfa9`（标签）、奶油白 `#fff6e8`（正文）。
+- 登录表单：账号、密码、项目空间左侧各有一个线性图标；密码可显隐；“保持登录”改为开关；提交按钮右侧带箭头，悬停时轻微右移。
+- 右侧照片在桌面端占整栏，在窄屏上作为顶部 220–320 px 的可见色带，表单变成悬浮卡片。
+- 照片加载失败时，背景使用暖橙 → 深海蓝 → 深梅的渐变兜底，不会退回单一底色。
+- 桌面端表单在左、影像在右；宽度 ≤980 px 时切换为「顶部影像 + 下方卡片」。
+- 表单栏顶部 5 px 的珊瑚 / 琥珀 / 青绿三段色条是远程影像 RGB 通道的视觉提示。
 
 ## 2. 流程
 
@@ -79,7 +91,7 @@ POST /auth/login
 | 401 `INVALID_CREDENTIALS` | 「账号或密码不正确」，聚焦并选中密码 |
 | 403 `PROJECT_FORBIDDEN` | 「你不是该项目的成员」，聚焦项目编号 |
 | 401 `UNAUTHENTICATED` | 清除本地会话，提示重新登录 |
-| 0 `NETWORK_ERROR` / `TIMEOUT` | 显示后端地址与恢复建议，表单可重试 |
+| 0 `NETWORK_ERROR` / `TIMEOUT` | 显示恢复建议（不显示接口地址），表单可重试 |
 | 5xx | 「服务端异常（5xx）」，不暴露堆栈 |
 | 429 | 「尝试次数过多，请稍后再试」 |
 | 502 `BAD_RESPONSE` | 后端返回缺少 `token` 或 `user.id` 时拒绝进入 |
@@ -139,7 +151,7 @@ POST /auth/login
 | 勾选保持登录 | 写 `localStorage`，`expiresAt` 为 7 天后 |
 | 已登录再开登录页 | `GET /me` 通过后自动进入工作台 |
 | 伪造 token | 清除会话并提示「会话已过期」 |
-| 后端停机 | 状态点变红，提交后显示 `NETWORK_ERROR` 与地址 |
+| 后端停机 | 提交后显示 `NETWORK_ERROR`，表单可重试 |
 | 退出 | 回到 `login.html?logout=1`，提示「已安全退出」 |
 | 真实后端模式直开工作台 | 重定向 `login.html?next=index.html` |
 | `?next=//evil.example/x` | 登录后回落到 `index.html` |
@@ -151,7 +163,11 @@ POST /auth/login
 `inspect.mjs` 未能运行：沙箱禁止 Node 子进程启动浏览器（`spawn EPERM`），
 因此改用 Playwright 截图与 DOM 度量（对比度、溢出、尺寸）。
 
-截图：`screenshots/05-login.png`（1440×900）、`screenshots/06-login-mobile.png`（390×844）。
+截图：`screenshots/07-login-colorful.png`（1440×900）、
+`screenshots/08-login-colorful-mobile.png`（390×844）、
+`screenshots/09-login-error.png`（401 错误态）、
+`screenshots/10-login-tablet.png`（551×735 @2x，窄屏竖版）。
+旧版单色稿保留在 `screenshots/05-login.png`、`06-login-mobile.png`。
 
 ## 9. 已知限制
 

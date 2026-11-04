@@ -1,12 +1,3 @@
-/* 会话存储：登录页与工作台共用的唯一入口。
- *
- * 存储位置由「记住登录」决定：
- *   勾选 → localStorage   （7 天，关闭浏览器仍保留）
- *   不勾选 → sessionStorage（仅当前标签页，关闭即失效）
- *
- * token 的键名与 api/client.js 保持一致（dsh.ship.token），
- * 因此工作台里的 API 客户端无需知道会话存在哪里。
- */
 (function (global) {
   'use strict';
 
@@ -87,7 +78,6 @@
     return base + '?next=' + encodeURIComponent(next);
   }
 
-  /* 工作台启动时调用：无会话则跳登录页，并带上返回路径。 */
   function requireAuth() {
     if (read()) return true;
     const file = (global.location.pathname.split('/').pop() || 'index.html');
