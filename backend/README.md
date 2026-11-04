@@ -76,6 +76,7 @@ backend/
   ai_assist.py   AI 候选核心：ROI 重检 + 轮廓兜底、合理性过滤、refine 约束（两个入口共用）
   ai_planner.py  VLM 规划器：大模型判断"有没有船"，几何仍由 ai_assist 产出；默认关闭
   tiles.py       大图瓦片：显示金字塔（不重叠）+ 推理切片预演（重叠），按需生成并缓存
+  stats.py       业务统计聚合：项目/任务两个视角，只统计库内真实记录
   security.py    口令哈希、会话令牌、登录限速
   maintenance.py 启动清理：过期上传、旧尝试产物、残留临时文件
   db.py          SQLite schema 与访问
@@ -124,6 +125,7 @@ backend/
 | 对账工具 | `python -m backend.tools.fsck [--delete]`：数据库 ↔ 文件一致性检查 |
 | 大图瓦片 | `POST /images/{id}/tile-plan`（推理切片预演）、`GET /images/{id}/tile-manifest`（金字塔层级）、`GET /tiles/{id}/{z}/{x}/{y}`（按需生成 + ETag 缓存） |
 | VLM 规划器 | `ai_planner.py`：大模型只做"这块有没有船"的判断，几何仍交给 `ai_assist`；默认关闭，配置 `SHIP_VLM_PROVIDER` 才启用，失败/超时一律降级 |
+| 业务统计 | `GET /projects/{id}/stats`（项目运行统计）与 `GET /tasks/{id}/stats`（单任务）；**只聚合业务库真实记录**，算法质量指标由评估体系单独产出 |
 
 ## 6. 验证（可复现）
 

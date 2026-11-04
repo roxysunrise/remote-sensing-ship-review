@@ -46,6 +46,8 @@
 | 2026-11-04 瓦片/规划器轮 / 同上 | `python -m unittest tests.test_tiles_and_planner -v` | 10 项通过（瓦片 5 + 规划器 5） | 浏览器实际贴块 |
 | 2026-11-04 瓦片/规划器轮 / 同上 + 实机 HTTP | 上传 1200×800 图后调用 `tile-plan` / `tile-manifest` / `/tiles/0/0/0` | 12 片（512/256）、4 层金字塔、瓦片 1652B JPEG 带 ETag、越界 404 | 大图渲染帧率、并发取块 |
 | 2026-11-04 瓦片/规划器轮 / 同上 | `python -m unittest discover -s tests` | **62 项通过** | VLM 真实效果（未接模型） |
+| 2026-11-04 统计轮 / 同上 | `python -m unittest tests.test_stats -v` | 3 项通过（聚合口径/时间过滤/单任务） | 大数据量下的查询性能 |
+| 2026-11-04 统计轮 / 同上 | `python -m unittest discover -s tests` | **69 项通过** | 页面展示（B 侧） |
 | 2026-11-04 / 同上 | 重启恢复：启动时把 `queued/running/merging` 任务标记 `SERVER_RESTART` 失败 | 代码路径已实现 | 未做故障注入实测 |
 
 详细记录见 [`docs/validation/backend-2026-11-04.md`](../validation/backend-2026-11-04.md)。
@@ -79,3 +81,6 @@
   `/tiles/{id}/{z}/{x}/{y}` 按需生成 + ETag 缓存）；新增 `ai_planner.py`（VLM 只做"有没有船"的判断，
   几何仍由 ai_assist 产出，默认关闭、失败降级），`ai_assist.propose` 增加 `gate` 钩子。
   实机验证 1200×800 图：12 片 / 4 层 / 瓦片带 ETag。测试 62 项通过。仍未合并、未部署。
+- 2026-11-04（业务统计轮）：新增 `stats.py` 与两个端点（项目统计、单任务统计），只聚合业务库真实记录；
+  口径（候选数≠确认数、accept_rate 分母、duration 仅统计已完成）写进接口文档。测试 69 项通过。
+  仍未合并、未部署。

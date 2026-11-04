@@ -474,6 +474,52 @@ class BackendTests(unittest.TestCase):
         self.assertFalse(orphan.exists())
 
 
+    # --- 统计 ---
+    def test_project_stats_endpoint(self):
+        body = self.client.get("/projects/harbor-a/stats", headers=self.headers)
+        self.assertEqual(body.status_code, 200, body.text)
+        payload = body.json()
+        for key in ("range", "images", "uploads", "tasks", "review", "versions", "ai", "regions"):
+            self.assertIn(key, payload)
+        self.assertIn("completion_rate", payload["review"])
+        self.assertIn("accept_rate", payload["ai"])
+        self.assertIn("p50", payload["tasks"]["duration_ms"])
+
+    def test_project_stats_rejects_bad_range(self):
+        bad = self.client.get("/projects/harbor-a/stats?from=yesterday", headers=self.headers)
+        self.assertEqual(bad.status_code, 422)
+        self.assertEqual(bad.json()["error"]["code"], "INVALID_ARGUMENT")
+
+    def test_project_stats_forbidden_for_non_member(self):
+        login = self.client.post("/auth/login", json={
+            "username": "analyst", "password": PASSWORD, "project_id": "harbor-a"}).json()
+        headers = {"Authorization": f"Bearer {login['token']}"}
+        denied = self.client.get("/projects/harbor-b/stats", headers=headers)
+        self.assertEqual(denied.status_code, 403)
+
+    @unittest.skipUnless(HAS_WEIGHTS, "缺少本地权重 best.pt，跳过真实推理用例")
+    def test_task_stats_after_real_run(self):
+        self._wait_idle()
+        state = self._upload(_image_bytes(), "stats.png")
+        task = self.client.post("/projects/harbor-a/tasks", json={
+            "image_id": state["image_id"],
+            "parameters": {"tiling": True, "tile_size": 128, "stride": 64, "imgsz": 128},
+        }, headers=self.headers).json()
+        deadline = time.time() + 240
+        while time.time() < deadline:
+            current = self.client.get(f"/tasks/{task['id']}", headers=self.headers).json()
+            if current["status"] in {"done", "failed", "cancelled"}:
+                break
+            time.sleep(0.2)
+        self.assertEqual(current["status"], "done", current)
+        stats = self.client.get(f"/tasks/{task['id']}/stats", headers=self.headers)
+        self.assertEqual(stats.status_code, 200, stats.text)
+        payload = stats.json()
+        self.assertEqual(payload["task"]["id"], task["id"])
+        self.assertGreater(payload["progress"]["tiles_total"], 0)
+        self.assertIsNotNone(payload["timing"]["predict_call_ms"])
+        self.assertIn("v0", payload["versions"]["labels"])
+
     def test_tile_plan_manifest_and_tile_fetch(self):
         state = self._upload(_image_bytes((900, 600)), "tiles.png")
         image_id = state["image_id"]

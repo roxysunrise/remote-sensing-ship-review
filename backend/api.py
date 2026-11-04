@@ -17,7 +17,8 @@ from fastapi.responses import FileResponse, Response
 
 from algorithm.errors import DetectionError
 
-from . import ai_assist, ai_planner, config, db, detector, errors, geometry, imaging, security, storage, tiles
+from . import (ai_assist, ai_planner, config, db, detector, errors, geometry, imaging, security,
+               stats, storage, tiles)
 
 router = APIRouter()
 
@@ -217,6 +218,32 @@ def list_projects(state: dict = State) -> list[dict]:
 def get_project(project_id: str, state: dict = State) -> dict:
     _member(project_id, state)
     return _project_payload(project_id)
+
+
+def _date_range(date_from: str | None, date_to: str | None) -> tuple[str, str]:
+    default_start, default_end = stats.default_range()
+    start = date_from or default_start
+    end = date_to or default_end
+    from datetime import datetime
+
+    for value in (start, end):
+        try:
+            datetime.fromisoformat(value)
+        except ValueError as exc:
+            raise errors.invalid("INVALID_ARGUMENT",
+                                 "from/to 需要 ISO 8601 时间，例如 2026-11-01T00:00:00+00:00") from exc
+    return start, end
+
+
+@router.get("/projects/{project_id}/stats")
+def project_statistics(project_id: str,
+                       date_from: str | None = Query(default=None, alias="from"),
+                       date_to: str | None = Query(default=None, alias="to"),
+                       state: dict = State) -> dict:
+    """项目运行统计。只聚合业务库真实记录；算法质量（AP 等）不在这里算。"""
+    _member(project_id, state)
+    start, end = _date_range(date_from, date_to)
+    return stats.project_stats(project_id, start, end)
 
 
 # --------------------------------------------------------------------------
@@ -493,6 +520,12 @@ def create_task(project_id: str, body: dict = Body(...), state: dict = State) ->
 @router.get("/tasks/{task_id}")
 def get_task(task_id: str, state: dict = State) -> dict:
     return _task_payload(_task_or_404(task_id, state))
+
+
+@router.get("/tasks/{task_id}/stats")
+def task_statistics(task_id: str, state: dict = State) -> dict:
+    """单任务统计：进度、耗时、复核进度、版本链、AI 候选数。"""
+    return stats.task_stats(_task_or_404(task_id, state))
 
 
 @router.post("/tasks/{task_id}/cancel")

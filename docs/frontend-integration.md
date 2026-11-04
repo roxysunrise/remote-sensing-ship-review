@@ -408,7 +408,66 @@ GET /tiles/{id}/{z}/{x}/{y}
 4. `detect-config.js` 的 `maxPayloadEdge` 从 1600 提到 **≥2048**，或对大图改走 `/tasks`（切片）。
 5. 大图（>8k）不要整图 `drawImage`，等瓦片服务接入（A 侧待交付）。
 
-## 16. 联调自检命令
+## 16. 业务统计（运行统计）
+
+> **只统计业务库里真实存在的记录**。算法质量（AP/Recall/边界误差）不在这里算——它需要独立标注集，
+> 由评估体系单独出报告，避免把"检出 32 个框"当成"准确率"展示。
+
+### `GET /projects/{project_id}/stats?from=…&to=…`
+
+`from`/`to` 为 ISO 8601 时间，省略则默认最近 30 天；格式错误返回 `422 INVALID_ARGUMENT`。
+
+```json
+{
+  "range": { "from": "…", "to": "…" },
+  "images":  { "total": 12, "ready": 12, "pixels_total": 12345678, "bytes_total": 9876543 },
+  "uploads": { "total": 13, "ready": 12, "failed": 1, "uploading": 0, "verifying": 0,
+               "expired": 0, "success_rate": 0.9231 },
+  "tasks":   { "total": 6, "done": 5, "failed": 1, "queued": 0, "running": 0,
+               "cancelled": 0, "merging": 0, "success_rate": 0.8333,
+               "tiles_total": 96, "tiles_done": 96, "detections_total": 184,
+               "duration_ms": { "p50": 8400.0, "p95": 31200.0, "samples": 5 } },
+  "review":  { "pending": 40, "confirmed": 120, "modified": 14, "deleted": 10,
+               "detections": 184, "by_origin": { "model": 178, "manual": 4, "ai": 2 },
+               "completion_rate": 0.7826,
+               "note": "count 是模型候选数；completion_rate 只反映复核动作，不代表整图已审核" },
+  "versions":{ "total": 11, "readonly": 6, "avg_per_task": 1.8333 },
+  "ai":      { "proposed": 9, "accepted": 5, "rejected": 2, "pending": 2,
+               "accept_rate": 0.7143,
+               "by_source": { "detect": { "proposed": 6, "accepted": 4, "rejected": 1, "accept_rate": 0.8 },
+                              "contour": { "proposed": 3, "accepted": 1, "rejected": 1, "accept_rate": 0.5 } },
+               "note": "accept_rate 的分母是已处理候选（接受+取消）" },
+  "regions": { "count": 4 }
+}
+```
+
+口径要点（页面上要写清楚，否则会被误读）：
+
+| 字段 | 含义 | 不要误解成 |
+|---|---|---|
+| `tasks.detections_total` | 各任务 `final_count` 之和 = 模型候选数 | 人工确认数 |
+| `review.completion_rate` | 有过复核动作（确认/修改/删除）的比例 | 整图审核完成 |
+| `ai.accept_rate` | 已处理候选里的接受比例 | 候选质量本身 |
+| `duration_ms.p50/p95` | 只统计有起止时间的已完成任务 | SLA |
+
+### `GET /tasks/{task_id}/stats`
+
+单任务视角，适合任务详情页/答辩演示：
+
+```json
+{ "task": { "id","status","attempt","image_id","parameters","cancel_requested","error" },
+  "progress": { "tiles_total": 12, "tiles_done": 12, "temp_count": 7, "final_count": 37 },
+  "timing": { "duration_ms": 8420.0, "predict_call_ms": 619.7, "merge_ms": 4.5, "decode_ms": 50.7 },
+  "detections": { "total": 37, "by_review_state": {…}, "by_origin": {…}, "avg_confidence": 0.83 },
+  "review": { "completion_rate": 0.62, "pending": 14 },
+  "versions": { "labels": ["v0","v1"], "latest": "v1" },
+  "ai": { "proposed": 3, "accepted": 2 },
+  "warnings": ["TILE_BOUNDARIES: …"] }
+```
+
+`timing.*` 取自任务的 `ship-detection/0.2` 结果文件；没有结果文件时如实返回 `null`，不估算。
+
+## 17. 联调自检命令
 
 ```powershell
 python -m backend.server --port 8000
