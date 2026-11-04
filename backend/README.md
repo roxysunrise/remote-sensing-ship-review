@@ -57,6 +57,14 @@ $env:SHIP_SEED_PASSWORD = "..."; $env:SHIP_SEED_ON_START = "0"   # 已有库时�
 | `SHIP_MAX_ACTIVE_TASKS` | 2 | 单项目同时排队/运行的任务上限，超出返回 429 |
 | `SHIP_MAX_QUEUE_LENGTH` | 20 | 全局排队长度上限 |
 | `SHIP_PRELOAD` | 0 | 设为 `1` 时启动后台预加载模型，首个交互不用等加载 |
+| `SHIP_VLM_PROVIDER` | none | VLM 规划器开关：`none` / `openai`（兼容 OpenAI 协议） |
+| `SHIP_VLM_BASE_URL` | `http://127.0.0.1:11434/v1` | 兼容接口地址（本地 Ollama/vLLM 或云端） |
+| `SHIP_VLM_MODEL` | `qwen2.5-vl-7b` | 模型名 |
+| `SHIP_VLM_API_KEY` | 空 | 云端 API 的密钥；本地部署留空 |
+| `SHIP_VLM_TIMEOUT` | 8 | 单次调用超时（秒） |
+| `SHIP_VLM_RETRIES` | 1 | 失败重试次数（不含首次） |
+| `SHIP_VLM_MAX_TOKENS` | 200 | 单次回答上限，控成本 |
+| `SHIP_VLM_DAILY_LIMIT` | 500 | 每日调用上限，超了自动降级为纯几何通道 |
 | `SHIP_CORS_ORIGINS` | 本地 8765 | 允许的前端源 |
 
 `var/` 已在 `.gitignore` 中，不会入库。

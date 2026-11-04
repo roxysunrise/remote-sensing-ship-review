@@ -48,6 +48,8 @@
 | 2026-11-04 瓦片/规划器轮 / 同上 | `python -m unittest discover -s tests` | **62 项通过** | VLM 真实效果（未接模型） |
 | 2026-11-04 统计轮 / 同上 | `python -m unittest tests.test_stats -v` | 3 项通过（聚合口径/时间过滤/单任务） | 大数据量下的查询性能 |
 | 2026-11-04 统计轮 / 同上 | `python -m unittest discover -s tests` | **69 项通过** | 页面展示（B 侧） |
+| 2026-11-04 VLM 接入轮 / 同上 | `python -m unittest tests.test_tiles_and_planner -v` | 13 项通过（预算/事件/状态） | 真实 VLM 效果 |
+| 2026-11-04 VLM 接入轮 / 同上 | `python -m unittest discover -s tests` | **73 项通过** | 同上 |
 | 2026-11-04 / 同上 | 重启恢复：启动时把 `queued/running/merging` 任务标记 `SERVER_RESTART` 失败 | 代码路径已实现 | 未做故障注入实测 |
 
 详细记录见 [`docs/validation/backend-2026-11-04.md`](../validation/backend-2026-11-04.md)。
@@ -84,3 +86,6 @@
 - 2026-11-04（业务统计轮）：新增 `stats.py` 与两个端点（项目统计、单任务统计），只聚合业务库真实记录；
   口径（候选数≠确认数、accept_rate 分母、duration 仅统计已完成）写进接口文档。测试 69 项通过。
   仍未合并、未部署。
+- 2026-11-04（VLM 接入轮，方向改为应用优先）：VLM 走 OpenAI 兼容接口，支持超时/重试/单次 token 上限/
+  每日额度，超预算自动降级；每次调用写 `ai.vlm_call` 事件；新增 `GET /ai/planner` 状态端点。
+  测试 73 项通过。评估体系从论文级 AP 降级为抽样自检 + 运行统计。仍未合并、未部署。

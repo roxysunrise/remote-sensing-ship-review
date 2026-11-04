@@ -303,6 +303,30 @@ v0 由模型结果自动生成，`readonly=true`。
 `POST /vision/segment` 支持同一组字段（`roi` / `point` / `existing_polygon`），
 返回的 `candidates[]` 多了 `source` 字段，`model.version` 升为 `0.2`。
 
+### VLM 增强（可选，默认关闭）
+
+AI 补框可以先让大模型判断"这块到底有没有船"，再决定要不要走几何通道：
+
+```
+点选/框选 → VLM（有没有船？） ── 没有 → 422 NO_CANDIDATE（带模型理由）
+                            └── 有/不确定 → ROI 重检 / 轮廓兜底
+```
+
+- **VLM 不输出坐标**，只给判断；几何永远由检测/分割产出。
+- 关闭、超时、失败、超预算——**一律降级为纯几何通道**，不影响可用性。
+- 配置见后端环境变量：`SHIP_VLM_PROVIDER=openai` + `SHIP_VLM_BASE_URL` + `SHIP_VLM_MODEL` + `SHIP_VLM_API_KEY`。
+
+```http
+GET /ai/planner
+→ { "enabled": true, "provider": "openai", "model": "qwen2.5-vl-7b",
+    "daily_limit": 500, "used_today": 12, "remaining": 488,
+    "budget_exhausted": false, "timeout_s": 8, "retries": 1,
+    "note": "关闭或超预算时 AI 补框自动降级为纯几何通道，不影响可用性" }
+```
+
+前端建议：AI 补框按钮旁显示「AI 增强：开启 / 已关闭 / 额度用尽」，避免用户点了没反馈。
+候选响应里的 `plan` 字段会带出本次判定（`model`、`verdict`、`elapsed_ms`、`reason`），可展示在详情面板。
+
 ---
 
 ## 11. 推理端点 `/vision/*`（检测工作台）

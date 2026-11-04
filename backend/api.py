@@ -424,6 +424,15 @@ def get_preview(image_id: str, request: Request, state: dict = State) -> Respons
                              etag=f"{row['sha256']}-{stat.st_size}-{stat.st_mtime_ns}")
 
 
+@router.get("/ai/planner")
+def ai_planner_status(state: dict = State) -> dict:
+    """VLM 规划器状态：是否启用、今日用量与剩余额度、预算是否耗尽。
+
+    前端可在 AI 补框按钮旁显示"AI 增强：开启/关闭/额度用尽"，避免用户点了没反应。
+    """
+    return ai_planner.status()
+
+
 # --------------------------------------------------------------------------
 # 大图瓦片：显示金字塔 + 推理切片预演
 # --------------------------------------------------------------------------
@@ -1010,7 +1019,7 @@ def get_export_file(export_id: str, name: str, state: dict = State) -> FileRespo
 # AI 辅助候选
 # --------------------------------------------------------------------------
 
-def _candidate_polygon(image_row, body: dict) -> dict:
+def _candidate_polygon(image_row, body: dict, state: dict | None = None) -> dict:
     """点选 / 框选 / 精修 → 候选旋转框。
 
     核心逻辑在 `ai_assist.propose`（与检测页共用一份实现）：先在 ROI 上按原分辨率
@@ -1028,13 +1037,16 @@ def _candidate_polygon(image_row, body: dict) -> dict:
         if existing is not None and (not isinstance(existing, list) or len(existing) != 4):
             raise errors.invalid("INVALID_POLYGON", "existing_polygon 必须是 4 个顶点")
         plan_record: dict = {}
+        state = state or {}
         candidates = ai_assist.propose(
             detector.service, image,
             roi=body.get("box"),
             point=body.get("point"),
             mode=mode,
             existing_polygon=existing,
-            gate=ai_planner.make_gate(plan_record),
+            gate=ai_planner.make_gate(plan_record,
+                                      project_id=image_row["project_id"],
+                                      user_id=(state.get("user") or {}).get("id")),
         )
         if not candidates:
             if plan_record.get("verdict") == "no":
@@ -1057,7 +1069,7 @@ def create_candidate(image_id: str, body: dict = Body(...), state: dict = State)
     if image["status"] != "ready":
         raise errors.conflict("IMAGE_NOT_READY", "影像尚未通过验证")
 
-    proposal = _candidate_polygon(image, body)
+    proposal = _candidate_polygon(image, body, state)
     polygon = proposal["polygon"]
     sides = [math.dist(polygon[i], polygon[(i + 1) % 4]) for i in range(4)]
     length_px, width_px = max(sides), min(sides)   # 取四条边，不能只取对边

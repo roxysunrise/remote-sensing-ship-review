@@ -59,6 +59,9 @@ VLM_BASE_URL = os.environ.get("SHIP_VLM_BASE_URL", "http://127.0.0.1:11434/v1")
 VLM_MODEL = os.environ.get("SHIP_VLM_MODEL", "qwen2.5-vl-7b")
 VLM_API_KEY = os.environ.get("SHIP_VLM_API_KEY", "")
 VLM_TIMEOUT = float(os.environ.get("SHIP_VLM_TIMEOUT", "8"))
+VLM_RETRIES = int(os.environ.get("SHIP_VLM_RETRIES", 1))          # 失败重试次数（不含首次）
+VLM_MAX_TOKENS = int(os.environ.get("SHIP_VLM_MAX_TOKENS", 200))   # 单次回答上限，控成本
+VLM_DAILY_LIMIT = int(os.environ.get("SHIP_VLM_DAILY_LIMIT", 500))  # 每天最多调用次数，超了自动停用
 
 CORS_ORIGINS = [o for o in os.environ.get(
     "SHIP_CORS_ORIGINS",

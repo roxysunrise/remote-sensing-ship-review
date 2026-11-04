@@ -498,6 +498,16 @@ class BackendTests(unittest.TestCase):
         self.assertEqual(denied.status_code, 403)
 
     @unittest.skipUnless(HAS_WEIGHTS, "缺少本地权重 best.pt，跳过真实推理用例")
+    def test_ai_planner_status_endpoint(self):
+        response = self.client.get("/ai/planner", headers=self.headers)
+        self.assertEqual(response.status_code, 200, response.text)
+        body = response.json()
+        for key in ("enabled", "provider", "model", "daily_limit", "used_today",
+                    "remaining", "budget_exhausted"):
+            self.assertIn(key, body)
+        self.assertFalse(body["enabled"], "测试环境默认不启用 VLM")
+        self.assertEqual(body["remaining"], body["daily_limit"])
+
     def test_task_stats_after_real_run(self):
         self._wait_idle()
         state = self._upload(_image_bytes(), "stats.png")

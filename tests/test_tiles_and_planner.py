@@ -139,6 +139,55 @@ class PlannerTests(unittest.TestCase):
         self.assertEqual(result, [])
         self.assertTrue(called.get("hit"))
 
+    # --- 成本控制与用量 ---
+    def test_daily_limit_disables_vlm_without_calling(self):
+        from backend import db
+
+        config.VLM_PROVIDER = "openai"
+        config.VLM_DAILY_LIMIT = 0
+        called = {"n": 0}
+
+        def fake(data_url):
+            called["n"] += 1
+            return {"has_ship": True, "count": 1, "reason": "", "usage": {}, "attempts": 1}
+
+        ai_planner._call_vlm = fake
+        record = {}
+        gate = ai_planner.make_gate(record)
+        self.assertIsNone(gate)
+        self.assertEqual(called["n"], 0, "超预算时不应发起任何外部调用")
+        self.assertEqual(record.get("skipped"), "daily_limit")
+        del db
+
+    def test_gate_records_event_with_usage(self):
+        from backend import db
+
+        config.VLM_PROVIDER = "openai"
+        config.VLM_DAILY_LIMIT = 500
+        ai_planner._call_vlm = lambda data_url: {
+            "has_ship": True, "count": 2, "reason": "两艘船",
+            "usage": {"total_tokens": 321}, "attempts": 1}
+
+        before = db.one("SELECT COUNT(*) AS n FROM events WHERE action='ai.vlm_call'")["n"]
+        record = {}
+        gate = ai_planner.make_gate(record, project_id="harbor-a", user_id="usr_owner")
+        self.assertEqual(gate(Image.new("RGB", (64, 64), (0, 0, 0))), "yes")
+        after = db.one("SELECT COUNT(*) AS n FROM events WHERE action='ai.vlm_call'")["n"]
+        self.assertEqual(after, before + 1)
+        self.assertEqual(record["verdict"], "yes")
+        self.assertEqual(record["count"], 2)
+
+    def test_status_reports_budget(self):
+        config.VLM_PROVIDER = "openai"
+        config.VLM_DAILY_LIMIT = 5
+        payload = ai_planner.status()
+        self.assertTrue(payload["enabled"])
+        self.assertEqual(payload["daily_limit"], 5)
+        self.assertIn("remaining", payload)
+        self.assertIn("budget_exhausted", payload)
+        config.VLM_PROVIDER = "none"
+        self.assertFalse(ai_planner.status()["enabled"])
+
 
 if __name__ == "__main__":
     unittest.main()
