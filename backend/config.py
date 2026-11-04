@@ -13,6 +13,7 @@ RESULT_DIR = VAR / "results"
 EXPORT_DIR = VAR / "exports"
 CHUNK_DIR = VAR / "chunks"
 TMP_DIR = VAR / "tmp"
+TILE_DIR = VAR / "tiles"
 DB_PATH = Path(os.environ.get("SHIP_DB_PATH") or (VAR / "ship.db")).resolve()
 
 WEIGHTS = Path(os.environ.get("SHIP_WEIGHTS") or (ROOT / "models/yolov8l-obb-dota-v1-80e/best.pt")).resolve()
@@ -52,6 +53,13 @@ DEFAULT_PARAMETERS = {
 VISION_MAX_EDGE = int(os.environ.get("SHIP_VISION_MAX_EDGE", 8192))
 VISION_MAX_BYTES = int(os.environ.get("SHIP_VISION_MAX_BYTES", 32 << 20))
 
+# VLM 规划器（AI 辅助的"判断"环节）。默认关闭，不配置就不产生任何外部调用。
+VLM_PROVIDER = os.environ.get("SHIP_VLM_PROVIDER", "none")   # none | openai（兼容 OpenAI 协议）
+VLM_BASE_URL = os.environ.get("SHIP_VLM_BASE_URL", "http://127.0.0.1:11434/v1")
+VLM_MODEL = os.environ.get("SHIP_VLM_MODEL", "qwen2.5-vl-7b")
+VLM_API_KEY = os.environ.get("SHIP_VLM_API_KEY", "")
+VLM_TIMEOUT = float(os.environ.get("SHIP_VLM_TIMEOUT", "8"))
+
 CORS_ORIGINS = [o for o in os.environ.get(
     "SHIP_CORS_ORIGINS",
     "http://127.0.0.1:8765,http://localhost:8765",
@@ -62,5 +70,5 @@ USER_ROLE_ANALYST = "项目分析员"
 
 
 def ensure_dirs() -> None:
-    for path in (VAR, BLOB_DIR, PREVIEW_DIR, RESULT_DIR, EXPORT_DIR, CHUNK_DIR, TMP_DIR):
+    for path in (VAR, BLOB_DIR, PREVIEW_DIR, RESULT_DIR, EXPORT_DIR, CHUNK_DIR, TMP_DIR, TILE_DIR):
         path.mkdir(parents=True, exist_ok=True)

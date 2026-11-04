@@ -16,7 +16,7 @@ import time
 from fastapi import APIRouter, Body
 from PIL import Image
 
-from . import ai_assist, config, detector, errors, imaging
+from . import ai_assist, ai_planner, config, detector, errors, imaging
 
 router = APIRouter(prefix="/vision", tags=["vision"])
 
@@ -143,10 +143,15 @@ def segment(payload: dict = Body(default_factory=dict)) -> dict:
         existing_payload = ([[float(p[0]) * sx, float(p[1]) * sy] for p in existing]
                             if existing else None)
 
+        plan_record: dict = {}
         candidates = ai_assist.propose(detector.service, image, roi=roi_payload,
                                        point=point_payload, mode=mode,
-                                       existing_polygon=existing_payload)
+                                       existing_polygon=existing_payload,
+                                       gate=ai_planner.make_gate(plan_record))
         if not candidates:
+            if plan_record.get("verdict") == "no":
+                raise errors.invalid("NO_CANDIDATE",
+                                     f"该区域没有目标（{plan_record.get('model')}：{plan_record.get('reason')}）")
             raise errors.invalid("NO_CANDIDATE", "该区域没有可用候选，请改用手动标注")
 
         elapsed_ms = round((time.perf_counter() - started) * 1000, 2)
@@ -154,10 +159,11 @@ def segment(payload: dict = Body(default_factory=dict)) -> dict:
             "request_id": request_id,
             "frame": {"index": int(frame.get("index") or 0), "time_ms": int(frame.get("time_ms") or 0),
                       "width": target_width, "height": target_height},
-            "model": {"name": "roi-oriented-proposal", "version": "0.2"},
+            "model": {"name": "roi-oriented-proposal", "version": "0.3"},
             "elapsed_ms": elapsed_ms,
             "roi": roi,
             "mode": mode,
+            "plan": plan_record or None,
             "candidates": [
                 {"id": f"c{index}", "label": "ship", "quality": item["quality"],
                  "confidence": None, "source": item["source"],

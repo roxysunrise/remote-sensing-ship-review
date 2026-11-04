@@ -321,7 +321,57 @@ v0 由模型结果自动生成，`readonly=true`。
 
 ---
 
-## 12. 错误码总表（前端按 `code` 分支，不要按 message）
+## 12. 大图瓦片（显示）与切片预演
+
+两件不同的事，接口分开：
+
+### 11.1 推理切片预演（画网格用）
+
+```http
+POST /images/{id}/tile-plan     { "tile_size": 512, "stride": 256 }
+```
+
+```json
+{ "image": { "width": 1200, "height": 800 },
+  "parameters": { "tile_size": 512, "stride": 256 },
+  "tile_count": 12,
+  "tiles": [ { "id": 1, "x": 0, "y": 0, "width": 512, "height": 512 }, … ],
+  "coverage": { "covered_px": …, "image_px": 960000, "overlap_ratio": 2.2768, "step": 256 },
+  "note": "仅几何预演，未运行模型；片序与任务实际切片的 id 一致" }
+```
+
+用途：任务开始前就能画出**真实网格**、显示"这张图会切几片、重叠多少"；
+`tiles[].id` 与结果里的 `source_tile_id` 一一对应，可用来做"已完成格子高亮"。
+
+### 11.2 显示金字塔
+
+```http
+GET /images/{id}/tile-manifest
+→ { "tile_edge": 256, "max_z": 3,
+    "levels": [ { "z": 0, "width": 1200, "height": 800, "cols": 5, "rows": 4, "scale": 1.0 }, … ],
+    "url_template": "/tiles/{image_id}/{z}/{x}/{y}" }
+
+GET /tiles/{id}/{z}/{x}/{y}
+→ JPEG，带 ETag；带 If-None-Match 命中返回 304
+```
+
+约定（**前端必须按这个实现，否则会错位**）：
+
+| 项 | 约定 |
+|---|---|
+| `z` 方向 | `z=0` 是**原生分辨率**（1:1），`z` 越大越粗，最大层整图只剩一块 |
+| 瓦片边长 | 256（manifest 的 `tile_edge` 为准） |
+| 坐标 | `x` 向右、`y` 向下，从 0 开始；`(x,y)` 与该层像素的换算：`px = x * 256 * 2^z` |
+| 越界 | 返回 `404 TILE_NOT_FOUND` |
+| 鉴权 | 与其它接口一致，跨项目 `403`；可直接用于 `<img>`（带 token 时用 fetch + blob，或用短期查询令牌，见下） |
+
+> **注意**：`<img src>` 不会自动带 `Authorization`。两种做法（任选）：
+> ① 用 `fetch(url, {headers:{Authorization}})` → `blob()` → `URL.createObjectURL`；
+> ② 我后续可加"短期签名查询串"（`?t=<10 分钟有效>`），前端最省事。需要就提，我加。
+
+前端要做的事（约 100–150 行）：视口 → 需要哪几块 → 只请求缺的 → 跨层时保留旧块 → 块未到达时用低层图或纯色占位。
+
+## 13. 错误码总表（前端按 `code` 分支，不要按 message）
 
 | HTTP | code | 典型场景 |
 |---|---|---|
@@ -338,7 +388,7 @@ v0 由模型结果自动生成，`readonly=true`。
 
 ---
 
-## 13. 与前端 OpenAPI 的三处差异
+## 14. 与前端 OpenAPI 的三处差异
 
 1. **`DetectResponse.frame`**：schema 要求 `index/time_ms/width/height`，而 `DETECT_API.md`
    示例只写了前两个。后端按 **schema** 输出四个字段（多给不少给）。
@@ -349,7 +399,7 @@ v0 由模型结果自动生成，`readonly=true`。
 
 ---
 
-## 14. 联调清单（前端需要做的 5 处）
+## 15. 联调清单（前端需要做的 5 处）
 
 1. `config.js` → `apiMode: 'http'`，`baseUrl` 指向后端；`detect-config.js` → `mode: 'http'`。
 2. 工作台底图：把 `app.js` 里写死的 `assets/harbor.png` 换成 `state.image.preview_url`，
@@ -358,7 +408,7 @@ v0 由模型结果自动生成，`readonly=true`。
 4. `detect-config.js` 的 `maxPayloadEdge` 从 1600 提到 **≥2048**，或对大图改走 `/tasks`（切片）。
 5. 大图（>8k）不要整图 `drawImage`，等瓦片服务接入（A 侧待交付）。
 
-## 15. 联调自检命令
+## 16. 联调自检命令
 
 ```powershell
 python -m backend.server --port 8000

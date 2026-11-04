@@ -474,6 +474,36 @@ class BackendTests(unittest.TestCase):
         self.assertFalse(orphan.exists())
 
 
+    def test_tile_plan_manifest_and_tile_fetch(self):
+        state = self._upload(_image_bytes((900, 600)), "tiles.png")
+        image_id = state["image_id"]
+
+        plan = self.client.post(f"/images/{image_id}/tile-plan",
+                                json={"tile_size": 256, "stride": 128}, headers=self.headers)
+        self.assertEqual(plan.status_code, 200, plan.text)
+        body = plan.json()
+        self.assertGreater(body["tile_count"], 1)
+        self.assertEqual(body["tiles"][0], {"id": 1, "x": 0, "y": 0, "width": 256, "height": 256})
+        self.assertGreater(body["coverage"]["overlap_ratio"], 0)
+
+        manifest = self.client.get(f"/images/{image_id}/tile-manifest", headers=self.headers).json()
+        self.assertEqual(manifest["tile_edge"], 256)
+        self.assertGreaterEqual(manifest["max_z"], 1)
+        self.assertEqual(manifest["levels"][0]["cols"], 4)      # 900 / 256 → 4 列
+
+        tile = self.client.get(f"/tiles/{image_id}/0/0/0", headers=self.headers)
+        self.assertEqual(tile.status_code, 200)
+        self.assertEqual(tile.headers.get("content-type"), "image/jpeg")
+        etag = tile.headers.get("etag")
+        self.assertTrue(etag)
+        cached = self.client.get(f"/tiles/{image_id}/0/0/0",
+                                 headers={**self.headers, "If-None-Match": etag})
+        self.assertEqual(cached.status_code, 304)
+
+        out_of_range = self.client.get(f"/tiles/{image_id}/0/999/0", headers=self.headers)
+        self.assertEqual(out_of_range.status_code, 404)
+        self.assertEqual(out_of_range.json()["error"]["code"], "TILE_NOT_FOUND")
+
     def test_ai_candidate_box_hint_and_events(self):
         if not HAS_WEIGHTS:
             self.skipTest("缺少本地权重，跳过真实推理用例")

@@ -74,6 +74,8 @@ backend/
   imaging.py     解码校验、预览生成、请求体图像解码
   geometry.py    复核原因、抽样网格、区域计数（复用 algorithm 的几何）
   ai_assist.py   AI 候选核心：ROI 重检 + 轮廓兜底、合理性过滤、refine 约束（两个入口共用）
+  ai_planner.py  VLM 规划器：大模型判断"有没有船"，几何仍由 ai_assist 产出；默认关闭
+  tiles.py       大图瓦片：显示金字塔（不重叠）+ 推理切片预演（重叠），按需生成并缓存
   security.py    口令哈希、会话令牌、登录限速
   maintenance.py 启动清理：过期上传、旧尝试产物、残留临时文件
   db.py          SQLite schema 与访问
@@ -120,6 +122,8 @@ backend/
 | 队列治理 | 单项目并发上限与全局排队上限，超出返回 `429 RATE_LIMITED` |
 | 启动清理 | 过期上传标记 `expired` 并删分片；旧 attempt 结果文件与残留临时文件回收 |
 | 对账工具 | `python -m backend.tools.fsck [--delete]`：数据库 ↔ 文件一致性检查 |
+| 大图瓦片 | `POST /images/{id}/tile-plan`（推理切片预演）、`GET /images/{id}/tile-manifest`（金字塔层级）、`GET /tiles/{id}/{z}/{x}/{y}`（按需生成 + ETag 缓存） |
+| VLM 规划器 | `ai_planner.py`：大模型只做"这块有没有船"的判断，几何仍交给 `ai_assist`；默认关闭，配置 `SHIP_VLM_PROVIDER` 才启用，失败/超时一律降级 |
 
 ## 6. 验证（可复现）
 

@@ -146,8 +146,12 @@ def _sane(candidate: dict, crop_box, mode: str, existing_polygon) -> bool:
 
 def propose(service, image, *, roi=None, point=None, mode: str = "fill",
             existing_polygon=None, pad: float = PAD, keep: int = 2,
-            conf: float = DETECT_CONF) -> list[dict]:
-    """生成 1–2 个候选（原图坐标）。没有可用候选时返回空列表。"""
+            conf: float = DETECT_CONF, gate=None) -> list[dict]:
+    """生成 1–2 个候选（原图坐标）。没有可用候选时返回空列表。
+
+    `gate(crop)` 是可选的大模型判定钩子（见 `ai_planner`）：
+    返回 "no" 表示"这块区域没有目标"，直接短路返回空；返回 "yes" 或 None 继续走几何通道。
+    """
     box = _hint_box(image, roi=roi, point=point,
                     existing_polygon=existing_polygon, mode=mode)
     if box[2] - box[0] < MIN_HINT_PX or box[3] - box[1] < MIN_HINT_PX:
@@ -159,6 +163,8 @@ def propose(service, image, *, roi=None, point=None, mode: str = "fill",
 
     crop = image.crop(crop_box)
     try:
+        if gate is not None and gate(crop) == "no":
+            return []
         candidates = _detect_candidates(service, crop, left, top, conf)
         if not candidates:
             fallback = _contour_candidate(crop, left, top)

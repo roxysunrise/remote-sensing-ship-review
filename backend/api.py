@@ -17,7 +17,7 @@ from fastapi.responses import FileResponse, Response
 
 from algorithm.errors import DetectionError
 
-from . import ai_assist, config, db, detector, errors, geometry, imaging, security, storage
+from . import ai_assist, ai_planner, config, db, detector, errors, geometry, imaging, security, storage, tiles
 
 router = APIRouter()
 
@@ -395,6 +395,57 @@ def get_preview(image_id: str, request: Request, state: dict = State) -> Respons
     stat = path.stat()
     return _conditional_file(path, request, media_type="image/jpeg",
                              etag=f"{row['sha256']}-{stat.st_size}-{stat.st_mtime_ns}")
+
+
+# --------------------------------------------------------------------------
+# 大图瓦片：显示金字塔 + 推理切片预演
+# --------------------------------------------------------------------------
+
+@router.post("/images/{image_id}/tile-plan")
+def tile_plan(image_id: str, body: dict = Body(default_factory=dict),
+              state: dict = State) -> dict:
+    """不跑模型，只算"按当前参数会切成几片、切在哪"——给界面画真实网格。"""
+    row = db.one("SELECT * FROM images WHERE id=?", (image_id,))
+    if row is None:
+        raise errors.not_found("IMAGE_NOT_FOUND", "影像不存在")
+    _member(row["project_id"], state)
+    if row["status"] != "ready":
+        raise errors.conflict("IMAGE_NOT_READY", "影像尚未通过验证")
+
+    tile_size = int(body.get("tile_size") or config.DEFAULT_PARAMETERS["tile_size"])
+    stride = int(body.get("stride") or config.DEFAULT_PARAMETERS["stride"])
+    try:
+        return tiles.plan_inference_tiles(row, tile_size, stride)
+    except DetectionError as exc:
+        raise errors.from_detection_error(exc) from exc
+
+
+@router.get("/images/{image_id}/tile-manifest")
+def tile_manifest(image_id: str, state: dict = State) -> dict:
+    """金字塔层级清单：每层的像素尺寸、块数、缩放比。"""
+    row = db.one("SELECT * FROM images WHERE id=?", (image_id,))
+    if row is None:
+        raise errors.not_found("IMAGE_NOT_FOUND", "影像不存在")
+    _member(row["project_id"], state)
+    return tiles.manifest(row)
+
+
+@router.get("/tiles/{image_id}/{z}/{x}/{y}")
+def get_tile(image_id: str, z: int, x: int, y: int, request: Request,
+             state: dict = State) -> Response:
+    """按需生成并缓存瓦片；跨项目 403，越界 404。"""
+    row = db.one("SELECT * FROM images WHERE id=?", (image_id,))
+    if row is None:
+        raise errors.not_found("IMAGE_NOT_FOUND", "影像不存在")
+    _member(row["project_id"], state)
+    try:
+        path, _ = tiles.read_tile(row, z, x, y)
+    except ValueError as exc:
+        raise errors.not_found("TILE_NOT_FOUND", str(exc)) from exc
+    except FileNotFoundError as exc:
+        raise errors.not_found("IMAGE_NOT_FOUND", "原图缺失，无法生成瓦片") from exc
+    return _conditional_file(path, request, media_type="image/jpeg",
+                             etag=tiles.tile_etag(row, z, x, y))
 
 
 # --------------------------------------------------------------------------
@@ -943,16 +994,23 @@ def _candidate_polygon(image_row, body: dict) -> dict:
         existing = body.get("existing_polygon")
         if existing is not None and (not isinstance(existing, list) or len(existing) != 4):
             raise errors.invalid("INVALID_POLYGON", "existing_polygon 必须是 4 个顶点")
+        plan_record: dict = {}
         candidates = ai_assist.propose(
             detector.service, image,
             roi=body.get("box"),
             point=body.get("point"),
             mode=mode,
             existing_polygon=existing,
+            gate=ai_planner.make_gate(plan_record),
         )
         if not candidates:
+            if plan_record.get("verdict") == "no":
+                raise errors.invalid("NO_CANDIDATE",
+                                     f"该区域没有目标（{plan_record.get('model')}：{plan_record.get('reason')}）")
             raise errors.invalid("NO_CANDIDATE", "该区域没有可用候选，请改用手动标注")
-        return candidates[0]
+        proposal = candidates[0]
+        proposal["plan"] = plan_record
+        return proposal
     finally:
         image.close()
 
@@ -981,10 +1039,15 @@ def create_candidate(image_id: str, body: dict = Body(...), state: dict = State)
                  target=candidate_id,
                  detail={"mode": str(body.get("mode") or "point"), "source": proposal["source"],
                          "quality": proposal["quality"]})
+    plan = proposal.get("plan") or {}
+    if plan:
+        db.log_event("ai.plan", project_id=image["project_id"], user_id=state["user"]["id"],
+                     target=candidate_id, detail=plan)
     return {"id": candidate_id, "image_id": image_id, "status": "preview", "polygon": polygon,
             "source": proposal["source"], "confidence": None,
             "width": round(width_px, 2), "length": round(length_px, 2),
-            "quality": proposal["quality"], "reason": proposal["reason"]}
+            "quality": proposal["quality"], "reason": proposal["reason"],
+            "plan": plan or None}
 
 
 @router.post("/ai-candidates/{candidate_id}/accept", status_code=201)
