@@ -540,6 +540,38 @@ def create_task(project_id: str, body: dict = Body(...), state: dict = State) ->
     return _task_payload(db.one("SELECT * FROM tasks WHERE id=?", (task_id,)))
 
 
+@router.get("/projects/{project_id}/tasks")
+def list_tasks(project_id: str, state: dict = State, status: str | None = None,
+               image_id: str | None = None, limit: int = 50) -> dict:
+    """项目任务列表（含影像摘要）。
+
+    前端刷新或重新进入时要回答"我跑过哪些任务 / 这幅图的最新任务是什么"，
+    此前只有按 id 取单个任务的端点，刷新后只能回到空工作台
+    （03 §2.2 要求刷新或重新进入后能继续查看已有任务）。
+    """
+    _member(project_id, state)
+    sql = ("SELECT t.*, i.file_name AS image_name, i.width AS image_width,"
+           " i.height AS image_height FROM tasks t LEFT JOIN images i ON i.id = t.image_id"
+           " WHERE t.project_id=?")
+    params: list = [project_id]
+    if status:
+        sql += " AND t.status=?"
+        params.append(status)
+    if image_id:
+        sql += " AND t.image_id=?"
+        params.append(image_id)
+    sql += " ORDER BY t.created_at DESC LIMIT ?"
+    params.append(max(1, min(int(limit or 50), 200)))
+    rows = db.query(sql, params)
+    items = []
+    for row in rows:
+        item = _task_payload(row)
+        item["image"] = {"id": row["image_id"], "file_name": row["image_name"],
+                         "width": row["image_width"], "height": row["image_height"]}
+        items.append(item)
+    return {"project_id": project_id, "total": len(items), "items": items}
+
+
 @router.get("/tasks/{task_id}")
 def get_task(task_id: str, state: dict = State) -> dict:
     return _task_payload(_task_or_404(task_id, state))

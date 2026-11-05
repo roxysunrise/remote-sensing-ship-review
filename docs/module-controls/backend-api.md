@@ -106,3 +106,13 @@
   新增 `scripts/e2e_link_check.py`（真实 HTTP 39 项）与 `scripts/browser_link_check.py`（Edge headless + CDP 7 项）。
   全套 77 项测试通过，契约 21/21 + 6/6。详细记录见
   [`docs/validation/link-2026-11-05.md`](../validation/link-2026-11-05.md)。仍未合并、未部署。
+- 2026-11-05（可直接运行轮）：补 `GET /projects/{id}/tasks`（带影像摘要、按 `status`/`image_id` 过滤、
+  `limit` 上限 200），加上前一轮的 `GET /projects/{id}/images`，前端终于能列出项目影像与任务
+  （此前只能用内置 `SCENE` 顶替，刷新后回不到已有任务）。
+  新增 `scripts/serve.py`（静态页 + `/api/v1` 同源反代，前端 `baseUrl` 留空即可、无 CORS）、
+  `scripts/start-dev.ps1` / `stop-dev.ps1`（一条命令起停：选解释器→查依赖→找权重→起后端→起前端→
+  等 health→开浏览器，PID 记 `var/dev-pids.json`）、`scripts/app_flow_check.py`（Edge headless 走查 13 项）。
+  契约补充见 [`contracts/api-project-lists.md`](../../contracts/api-project-lists.md)（待 B 方确认并入 openapi），
+  使用说明见 [`docs/quickstart.md`](../quickstart.md)。
+  测试 78 项通过；真实浏览器 13 项全过（影像列表 6 条、任务列表 6 条、点影像进工作台 15 个目标、四视图无 JS 异常）。
+  仍未合并、未部署。

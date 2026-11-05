@@ -222,6 +222,36 @@ class BackendTests(unittest.TestCase):
         self.assertEqual(response.status_code, 404)
         self.assertEqual(created["status"], "uploading")
 
+    def test_project_tasks_list(self):
+        """刷新或重新进入后要能找回已有任务：列表带影像摘要，可按影像过滤。"""
+        self._wait_idle()
+        state = self._upload(_image_bytes((160, 120)), "list-task.png")
+        created = self.client.post("/projects/harbor-a/tasks", json={
+            "image_id": state["image_id"],
+            "parameters": {"tiling": True, "tile_size": 128, "stride": 64, "imgsz": 128},
+        }, headers=self.headers)
+        self.assertEqual(created.status_code, 201, created.text)
+        task_id = created.json()["id"]
+
+        body = self.client.get("/projects/harbor-a/tasks?limit=50", headers=self.headers).json()
+        ids = [item["id"] for item in body["items"]]
+        self.assertEqual(body["total"], len(ids))
+        self.assertIn(task_id, ids)
+        item = next(i for i in body["items"] if i["id"] == task_id)
+        self.assertEqual(item["image"]["file_name"], "list-task.png")
+        self.assertEqual(item["image"]["width"], 160)
+        self.assertIn("status", item)
+
+        filtered = self.client.get(f"/projects/harbor-a/tasks?image_id={state['image_id']}",
+                                   headers=self.headers).json()
+        self.assertEqual([i["id"] for i in filtered["items"]], [task_id])
+
+        login = self.client.post("/auth/login", json={
+            "username": "analyst", "password": PASSWORD, "project_id": "harbor-a"}).json()
+        denied = self.client.get("/projects/harbor-b/tasks",
+                                 headers={"Authorization": f"Bearer {login['token']}"})
+        self.assertEqual(denied.status_code, 403)
+
     def _wait_idle(self, timeout: float = 180) -> None:
         """等队列清空，避免上一个用例遗留的任务触发并发上限。"""
         deadline = time.time() + timeout
