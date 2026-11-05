@@ -3,8 +3,11 @@
 ## 身份与状态
 
 - 模块 ID：`backend-api`；A 主责（工程骨架 + 计算接入），业务页面与业务数据模型由 B 方提出并确认。
-- 更新日期：2026-11-04（Asia/Shanghai）。
-- 状态：**可接入**。本地实测通过，未合入 main，未部署，未与前端做浏览器联调。
+- 更新日期：2026-11-05（Asia/Shanghai）。
+- 状态：**已接入（部分）**。2026-11-05 完成真实权重 + 真实 HTTP + 真实浏览器联调：登录、工作台渲染、
+  上传、检测、复核、版本、区域、导出、`/vision/*` 全链路通过。仍有两处 B 侧未接：
+  工作台影像卡片仍用内置演示影像（新端点 `GET /projects/{id}/images` 已就绪待接）、
+  `index.html` 的"演示数据"徽章硬编码。未合入 main、未部署、未做应用验收。
 - Git：分支 `codex/app-backend`（实现提交 `148be2e`，远端已核对一致），基线 `codex/ship-tiled-inference`（685eddc）。
 - Issue：[#7](https://github.com/roxysunrise/remote-sensing-ship-review/issues/7)；
   PR：[#8](https://github.com/roxysunrise/remote-sensing-ship-review/pull/8)（base `codex/ship-tiled-inference`，mergeable clean）。
@@ -51,6 +54,10 @@
 | 2026-11-04 VLM 接入轮 / 同上 | `python -m unittest tests.test_tiles_and_planner -v` | 13 项通过（预算/事件/状态） | 真实 VLM 效果 |
 | 2026-11-04 VLM 接入轮 / 同上 | `python -m unittest discover -s tests` | **73 项通过** | 同上 |
 | 2026-11-04 / 同上 | 重启恢复：启动时把 `queued/running/merging` 任务标记 `SERVER_RESTART` 失败 | 代码路径已实现 | 未做故障注入实测 |
+| 2026-11-05 联调轮 / Windows + Python3.10.20 + 官方 OBB 权重 + CPU | `python -m unittest discover -s tests`（`SHIP_WEIGHTS` 指向真实权重） | **77 项通过**；真实推理用例首次真正执行 | GPU、并发、重启故障注入 |
+| 2026-11-05 联调轮 / 同上 + 真实 uvicorn + 真实 socket | `python scripts/e2e_link_check.py`（走 `/api/v1`，非 TestClient） | **39 项通过**：登录→分片上传→影像→瓦片→任务 12 片/13 框→草稿 13→空提交 409→补框→v1→复核 11 条→区域 13/14→三格式导出→统计→AI 候选 `source=detect`→`/vision/detect` 坐标还原 | 多用户并发、GPU |
+| 2026-11-05 联调轮 / Edge headless + CDP | `python scripts/browser_link_check.py` | **7 项通过**：真实 DOM 填表登录→跳转工作台→渲染"港口巡查 A 区"→检测页徽章"真实接口"；截图见 `docs/validation/screens/` | 完整页面交互回归（仅关键路径） |
+| 2026-11-05 联调轮 / 同上 | 契约校验（B 方 `openapi.yaml` / `detect-openapi.yaml`） | 业务 21/21、推理 6/6 | 其余端点需构造前置状态 |
 
 详细记录见 [`docs/validation/backend-2026-11-04.md`](../validation/backend-2026-11-04.md)。
 
@@ -89,3 +96,13 @@
 - 2026-11-04（VLM 接入轮，方向改为应用优先）：VLM 走 OpenAI 兼容接口，支持超时/重试/单次 token 上限/
   每日额度，超预算自动降级；每次调用写 `ai.vlm_call` 事件；新增 `GET /ai/planner` 状态端点。
   测试 73 项通过。评估体系从论文级 AP 降级为抽样自检 + 运行统计。仍未合并、未部署。
+- 2026-11-05（联调轮）：**修 P0 缺陷——真实任务跑完后草稿恒为空**。`jobs._ensure_v0` 发布 v0 时顺手建了
+  `draft_state`，而 `api._ensure_draft` 以"state 存在"为早退条件，导致 v0 的框从未进入 `draft_detections`；
+  表现为工作台打开是空画布，且首次提交会把空草稿当成"删除全部框"提交，静默产生清空结果的版本。
+  修法：删掉 `jobs` 里的 INSERT，草稿统一由 `_ensure_draft` 懒创建；抽出 `_fill_draft` 并加自愈
+  （state 存在但无内容、基线版本非空时补齐）。反证：回退修复后 `test_task_lifecycle_end_to_end`
+  报 `AssertionError: 0 != 1`。
+  同时补 `GET /projects/{id}/images`（工作台此前无端点可列影像，只能拿内置演示影像顶替）。
+  新增 `scripts/e2e_link_check.py`（真实 HTTP 39 项）与 `scripts/browser_link_check.py`（Edge headless + CDP 7 项）。
+  全套 77 项测试通过，契约 21/21 + 6/6。详细记录见
+  [`docs/validation/link-2026-11-05.md`](../validation/link-2026-11-05.md)。仍未合并、未部署。

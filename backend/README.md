@@ -1,11 +1,12 @@
 # 后端：为 `frontend/` 提供真实数据与计算
 
-实现 B 方前端（PR #6，`frontend/`）声明的**全部接口**：业务 29 个端点 + 推理 5 个端点。
+实现 B 方前端（PR #6，`frontend/`）声明的**全部接口**：业务 29 个端点 + 推理 5 个端点，
+另加 A 侧补充端点：项目/任务统计 2、大图瓦片 3、切片预演 1、项目影像列表 1、VLM 状态 1。
 检测与几何一律调用仓库里的 `algorithm/`，后端不复制算法实现。
 
 - 技术栈：Python 3.10 / FastAPI / SQLite（WAL）/ 本地私有文件目录
 - 契约来源：`frontend/api/openapi.yaml`、`frontend/api/detect-openapi.yaml`、`contracts/ship-detection-v0.2.md`
-- 当前状态：**可接入**（本地实测，未合入 main，未部署）
+- 当前状态：**已接入（部分）**（2026-11-05 真实权重 + 真实 HTTP + 真实浏览器联调通过；未合入 main，未部署）
 
 ## 1. 启动
 
@@ -148,7 +149,15 @@ backend/
 & .venv/Scripts/python.exe -m backend.tools.fsck
 ```
 
-最近一次结果见 [`docs/validation/backend-2026-11-04.md`](../docs/validation/backend-2026-11-04.md)。
+真实 HTTP 与真实浏览器联调（后端已启动、前端已切 `apiMode: 'http'`）：
+
+```powershell
+& .venv/Scripts/python.exe scripts/e2e_link_check.py --image frontend/assets/harbor.png   # 39 项
+& .venv/Scripts/python.exe scripts/browser_link_check.py                                  # Edge headless + CDP，7 项
+```
+
+最近一次结果见 [`docs/validation/link-2026-11-05.md`](../docs/validation/link-2026-11-05.md)（含截图），
+更早的分轮记录见 [`docs/validation/backend-2026-11-04.md`](../docs/validation/backend-2026-11-04.md)。
 
 ## 7. 已知限制
 

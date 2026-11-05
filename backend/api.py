@@ -398,6 +398,20 @@ def get_image(image_id: str, state: dict = State) -> dict:
     return _image_payload(row)
 
 
+@router.get("/projects/{project_id}/images")
+def list_images(project_id: str, state: dict = State) -> dict:
+    """项目影像列表。
+
+    工作台要回答"这个项目里有哪些影像"，此前只有 `GET /images/{id}` 单张查询，
+    前端只能拿内置演示影像顶替，页面上的文件名和数量与后端真实数据不一致。
+    """
+    _member(project_id, state)
+    rows = db.query("SELECT * FROM images WHERE project_id=? ORDER BY created_at DESC",
+                    (project_id,))
+    items = [_image_payload(row) for row in rows]
+    return {"project_id": project_id, "total": len(items), "items": items}
+
+
 @router.get("/files/{image_id}")
 def get_file(image_id: str, request: Request, state: dict = State) -> Response:
     row = db.one("SELECT * FROM images WHERE id=?", (image_id,))
@@ -581,16 +595,11 @@ def get_result(task_id: str, state: dict = State) -> dict:
 # 草稿
 # --------------------------------------------------------------------------
 
-def _ensure_draft(task_id: str) -> None:
-    if db.one("SELECT task_id FROM draft_state WHERE task_id=?", (task_id,)):
-        return
-    version = db.one("SELECT detections FROM versions WHERE task_id=? AND label='v0'", (task_id,))
-    if version is None:
-        raise errors.conflict("RESULT_NOT_READY", "任务尚未产出可复核的结果")
-    detections = json.loads(version["detections"])
+def _fill_draft(task_id: str, detections: list[dict], base_version: str) -> None:
+    """把某个版本的框灌进草稿（幂等：已存在的 detection_id 不覆盖）。"""
     with db.tx() as conn:
         conn.execute("INSERT OR IGNORE INTO draft_state(task_id,base_version,updated_at) VALUES(?,?,?)",
-                     (task_id, "v0", db.now()))
+                     (task_id, base_version, db.now()))
         for det in detections:
             conn.execute(
                 "INSERT OR IGNORE INTO draft_detections(task_id,detection_id,polygon,class_id,"
@@ -600,6 +609,25 @@ def _ensure_draft(task_id: str) -> None:
                  det.get("class_name", "ship"), det.get("confidence"), det.get("source_tile_id"),
                  det.get("review_state", "pending"), det.get("origin", "model"), det.get("note")),
             )
+
+
+def _ensure_draft(task_id: str) -> None:
+    state = db.one("SELECT base_version FROM draft_state WHERE task_id=?", (task_id,))
+    if state is not None:
+        if db.one("SELECT 1 AS one FROM draft_detections WHERE task_id=? LIMIT 1", (task_id,)):
+            return
+        # 只建了 state、没有内容的旧库/异常路径：基线版本有框就补一次。
+        # 基线版本本身为空（用户 reset 到空版本）时不补，保持空草稿语义。
+        base = state["base_version"] or "v0"
+        version = db.one("SELECT detections FROM versions WHERE task_id=? AND label=?", (task_id, base))
+        detections = json.loads(version["detections"]) if version else []
+        if detections:
+            _fill_draft(task_id, detections, base)
+        return
+    version = db.one("SELECT detections FROM versions WHERE task_id=? AND label='v0'", (task_id,))
+    if version is None:
+        raise errors.conflict("RESULT_NOT_READY", "任务尚未产出可复核的结果")
+    _fill_draft(task_id, json.loads(version["detections"]), "v0")
 
 
 def _draft_detections(task_id: str) -> list[dict]:

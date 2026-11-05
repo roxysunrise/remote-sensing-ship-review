@@ -185,8 +185,9 @@ class TaskRuntime:
              json.dumps(counts, ensure_ascii=False),
              json.dumps([_model_detection(d) for d in detections], ensure_ascii=False)),
         )
-        db.execute("INSERT OR IGNORE INTO draft_state(task_id,base_version,updated_at) VALUES(?,?,?)",
-                   (task_id, "v0", db.now()))
+        # 不要在这里建 draft_state：草稿由 api._ensure_draft 懒创建，
+        # 它同时负责把 v0 的框灌进 draft_detections。只建 state 会让
+        # `_ensure_draft` 早退，草稿恒为空（2026-11-05 修复）。
 
     # --- 终态 -------------------------------------------------------------
     def _is_cancelled(self, task_id: str) -> bool:

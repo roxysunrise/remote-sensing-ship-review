@@ -56,6 +56,13 @@ def _image_bytes(size=(256, 200), with_shape=True) -> bytes:
     return buffer.getvalue()
 
 
+def _fake_detection(index: int) -> dict:
+    """构造一条 v0 里的模型框，仅用于草稿初始化测试。"""
+    return {"id": index, "polygon": [[1, 1], [30, 1], [30, 12], [1, 12]], "class_id": 1,
+            "class_name": "ship", "confidence": 0.9, "source_tile_id": 1,
+            "review_state": "pending", "origin": "model"}
+
+
 class BackendTests(unittest.TestCase):
     client: TestClient
     token: str
@@ -101,6 +108,25 @@ class BackendTests(unittest.TestCase):
         body = self.client.get("/projects/harbor-a", headers=self.headers).json()
         self.assertEqual(body["code"], "PRJ-A-0271")
         self.assertTrue(any(m["role"] == config.USER_ROLE_OWNER for m in body["members"]))
+
+    def test_project_images_list(self):
+        """工作台需要项目影像列表；缺这个端点时前端只能用内置演示影像顶替。"""
+        data = _image_bytes((120, 90))
+        state = self._upload(data, "list.png")
+        body = self.client.get("/projects/harbor-a/images", headers=self.headers).json()
+        ids = [item["id"] for item in body["items"]]
+        self.assertEqual(body["total"], len(ids))
+        self.assertIn(state["image_id"], ids)
+        item = next(i for i in body["items"] if i["id"] == state["image_id"])
+        self.assertEqual(item["file_name"], "list.png")
+        self.assertEqual(item["file_url"], f"/files/{state['image_id']}")
+        self.assertEqual(item["sha256"], hashlib.sha256(data).hexdigest())
+
+        login = self.client.post("/auth/login", json={
+            "username": "analyst", "password": PASSWORD, "project_id": "harbor-a"}).json()
+        denied = self.client.get("/projects/harbor-b/images",
+                                 headers={"Authorization": f"Bearer {login['token']}"})
+        self.assertEqual(denied.status_code, 403)
 
     def test_cross_project_access_denied(self):
         response = self.client.get("/projects/harbor-b", headers=self.headers)
@@ -601,6 +627,51 @@ class BackendTests(unittest.TestCase):
         tiny = self.client.post(f"/images/{state['image_id']}/ai-candidates",
                                 json={"mode": "box", "box": [10, 10, 11, 11]}, headers=self.headers)
         self.assertEqual(tiny.status_code, 422)
+
+
+    # --- 草稿初始化（2026-11-05 修复：jobs 先建 state 导致草稿恒为空） --------
+    def _seed_v0(self, task_id: str, detections: list[dict]) -> None:
+        db.execute(
+            "INSERT INTO versions(task_id,label,project_id,author,created_at,readonly,summary,counts,"
+            "detections) VALUES(?,?,?,?,?,?,?,?,?)",
+            (task_id, "v0", "harbor-a", "model", db.now(), 1, json.dumps({}), json.dumps({}),
+             json.dumps(detections, ensure_ascii=False)),
+        )
+
+    @staticmethod
+    def _draft_ids(task_id: str) -> list[int]:
+        rows = db.query("SELECT detection_id FROM draft_detections WHERE task_id=? ORDER BY detection_id",
+                        (task_id,))
+        return [row["detection_id"] for row in rows]
+
+    def test_draft_created_from_v0(self):
+        from backend import api
+        task_id = f"tsk_{uuid.uuid4().hex[:8]}"
+        self._seed_v0(task_id, [_fake_detection(1), _fake_detection(2)])
+        api._ensure_draft(task_id)
+        self.assertEqual(self._draft_ids(task_id), [1, 2])
+        state = db.one("SELECT base_version FROM draft_state WHERE task_id=?", (task_id,))
+        self.assertEqual(state["base_version"], "v0")
+
+    def test_draft_backfilled_when_state_has_no_rows(self):
+        """旧缺陷会留下"有 state、无 detection"的草稿；再次读取必须补齐。"""
+        from backend import api
+        task_id = f"tsk_{uuid.uuid4().hex[:8]}"
+        self._seed_v0(task_id, [_fake_detection(1)])
+        db.execute("INSERT INTO draft_state(task_id,base_version,updated_at) VALUES(?,?,?)",
+                   (task_id, "v0", db.now()))
+        api._ensure_draft(task_id)
+        self.assertEqual(self._draft_ids(task_id), [1])
+
+    def test_draft_stays_empty_when_base_version_empty(self):
+        """基线版本本身为空（用户 reset 到空版本）时不能凭空造框。"""
+        from backend import api
+        task_id = f"tsk_{uuid.uuid4().hex[:8]}"
+        self._seed_v0(task_id, [])
+        db.execute("INSERT INTO draft_state(task_id,base_version,updated_at) VALUES(?,?,?)",
+                   (task_id, "v0", db.now()))
+        api._ensure_draft(task_id)
+        self.assertEqual(self._draft_ids(task_id), [])
 
 
 if __name__ == "__main__":
