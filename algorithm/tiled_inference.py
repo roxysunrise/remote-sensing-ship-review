@@ -1,4 +1,5 @@
 """Bounded RGB tiled inference; full-image polygon NMS, without retraining."""
+import contextlib
 from datetime import datetime, timezone
 import math
 from numbers import Real
@@ -12,6 +13,12 @@ from .ship_detector import DetectionError, MAX_LARGE_PIXELS, canonical_polygon, 
 
 MAX_TILES = 4096
 MAX_CANDIDATES = 20000
+
+
+def _input_stamp(path):
+    """(size, mtime_ns)。正常情况下用它代替整文件重算；命中变化才回退到全量哈希。"""
+    stat = Path(path).stat()
+    return (stat.st_size, stat.st_mtime_ns)
 
 
 def validate_tiling(tile_size, stride, merge_iou):
@@ -78,21 +85,32 @@ def polygon_nms(detections, threshold):
     return [{**d, "id": i + 1} for i, d in enumerate(kept)]
 
 
-def predict_large(detector, image_path, *, tile_size, stride, merge_iou, conf, iou, imgsz, max_det):
+def predict_large(detector, image_path, *, tile_size, stride, merge_iou, conf, iou, imgsz, max_det,
+                  on_progress=None, should_cancel=None, tile_lock=None):
+    """Tiled inference. `on_progress(tile_id, tile_total, candidate_count)` is optional and does not
+    change results; `should_cancel()` is polled only at tile boundaries, so cancellation is never
+    observed inside a model call and never produces a partial result.
+
+    `tile_lock` 只包住单片的模型调用，让调用方能在片间把 GPU 让给别的请求；
+    不传时行为与之前完全一致。
+    """
     validate_tiling(tile_size, stride, merge_iou)
     detector.validate_parameters(conf, iou, imgsz, max_det)
     started = time.perf_counter()
     image = read_image(image_path, max_pixels=MAX_LARGE_PIXELS)
     try:
         fingerprint = sha256(Path(image_path))
+        stamp = _input_stamp(image_path)
         tiles = plan_tiles(image.width, image.height, tile_size, stride)
         decoded = time.perf_counter()
         candidates, records, warnings = [], [], []
         for tile_id, box in enumerate(tiles, 1):
             tile_started = time.perf_counter()
+            guard = tile_lock if tile_lock is not None else contextlib.nullcontext()
             try:
-                with image.crop(box) as crop:
-                    detections, _ = detector._infer_image(crop, conf=conf, iou=iou, imgsz=imgsz, max_det=max_det)
+                with guard:
+                    with image.crop(box) as crop:
+                        detections, _ = detector._infer_image(crop, conf=conf, iou=iou, imgsz=imgsz, max_det=max_det)
             except DetectionError as exc:
                 raise DetectionError(exc.code, f"Tile {tile_id}: {exc}") from exc
             if len(candidates) + len(detections) > MAX_CANDIDATES:
@@ -106,10 +124,14 @@ def predict_large(detector, image_path, *, tile_size, stride, merge_iou, conf, i
                             "width": box[2] - box[0], "height": box[3] - box[1],
                             "candidate_count": len(detections),
                             "predict_ms": (time.perf_counter() - tile_started) * 1000})
+            if on_progress is not None:
+                on_progress(tile_id, len(tiles), len(candidates))
+            if should_cancel is not None and should_cancel():
+                raise DetectionError("CANCELLED", f"Cancelled at tile boundary {tile_id}/{len(tiles)}")
         inferred = time.perf_counter()
         detections = polygon_nms(candidates, merge_iou)
         merged = time.perf_counter()
-        if sha256(Path(image_path)) != fingerprint:
+        if _input_stamp(image_path) != stamp and sha256(Path(image_path)) != fingerprint:
             raise DetectionError("IMAGE_CHANGED", "Input image changed during inference")
         if max(image.size) > tile_size:
             warnings.append("TILE_BOUNDARIES: truncated objects may remain or be missed; fragments are not stitched")

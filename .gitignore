@@ -29,6 +29,7 @@ storage/
 backups/
 outputs/
 datasets/
+var/
 weights/
 *.pt
 *.pth

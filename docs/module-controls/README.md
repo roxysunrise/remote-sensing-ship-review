@@ -5,6 +5,7 @@
 | 模块 ID | 负责人 | 控制文档 | 当前记录 |
 |---|---|---|---|
 | ship-detection | A | [船舶检测](ship-detection.md) | 同模块新增大图切片/合并模式，17项测试及CPU/GPU已验证；[增强PR #5](https://github.com/roxysunrise/remote-sensing-ship-review/pull/5)已上传，依赖单图基线#4及总控#2；未合并/部署 |
+| backend-api | A | [后端 API](backend-api.md) | 实现 B 方前端声明的 29+5 个端点，另加瓦片 3 个、切片预演、项目/任务统计 2 个；73项测试（18 算法 + 31 后端 + 8 ai_assist + 13 瓦片/规划器 + 3 统计）与契约校验（21/21 + 6/6）本地通过；已完成片级让锁/内存直推/ETag/限流/清理、AI 补框与精修、大图瓦片与 VLM 规划器骨架；Issue #7、[PR #8](https://github.com/roxysunrise/remote-sensing-ship-review/pull/8)已上传，base 为检测分支 `codex/ship-tiled-inference`；未合并/部署 |
 
 后续按实际工作登记大图检测、Worker、编辑组件、AI辅助、上传存储等模块，不把尚未开始的模块登记为完成。职责按实际已确认协议填写；不得用本索引改变 B 方分工。
 

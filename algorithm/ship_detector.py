@@ -138,12 +138,19 @@ class ShipDetector:
 
     def predict_large(self, image_path: str | Path, *, tile_size: int = 1024,
                       stride: int = 512, merge_iou: float = 0.1, conf: float = 0.25,
-                      iou: float = 0.7, imgsz: int = 1024, max_det: int = 1000) -> dict:
-        """Tiled inference in original pixels; see ship-detection v0.2 contract."""
+                      iou: float = 0.7, imgsz: int = 1024, max_det: int = 1000,
+                      on_progress=None, should_cancel=None, tile_lock=None) -> dict:
+        """Tiled inference in original pixels; see ship-detection v0.2 contract.
+
+        `on_progress`、`should_cancel` 和 `tile_lock` 是可选集成钩子，供任务运行时做进度、
+        取消与片间让锁；不传时行为与之前完全一致。
+        """
         from .tiled_inference import predict_large
         return predict_large(self, image_path, tile_size=tile_size, stride=stride,
                              merge_iou=merge_iou, conf=conf, iou=iou,
-                             imgsz=imgsz, max_det=max_det)
+                             imgsz=imgsz, max_det=max_det,
+                             on_progress=on_progress, should_cancel=should_cancel,
+                             tile_lock=tile_lock)
 
     def predict(self, image_path: str | Path, *, conf: float = 0.25, iou: float = 0.7,
                 imgsz: int = 1024, max_det: int = 1000) -> dict:
@@ -173,6 +180,41 @@ class ShipDetector:
                           "predict_call": (inferred - decoded) * 1000,
                           "total_before_save": (time.perf_counter() - started) * 1000,
                           "backend": backend},
+            "count": len(detections), "warnings": warnings, "detections": detections,
+        }
+
+
+    def predict_image(self, image: Image.Image, *, conf: float = 0.25, iou: float = 0.7,
+                      imgsz: int = 1024, max_det: int = 1000) -> dict:
+        """在已解码的内存图像上推理：不落盘、不做文件哈希。
+
+        供 `/vision/detect` 这类短请求使用：调用方已经解码并校验过，重复写盘和重算 SHA256
+        是纯浪费。结果结构与 `predict()` 一致，只是 `image.file_name` / `image.sha256` 为 None。
+        """
+        self.validate_parameters(conf, iou, imgsz, max_det)
+        if getattr(image, "mode", None) != "RGB":
+            raise DetectionError("INVALID_IMAGE", "Image must decode as RGB")
+        started = time.perf_counter()
+        detections, backend = self._infer_image(image, conf=conf, iou=iou, imgsz=imgsz, max_det=max_det)
+        inferred = time.perf_counter()
+        warnings = []
+        if len(detections) >= max_det:
+            warnings.append("MAX_DET_REACHED: detections may be truncated")
+        if max(image.size) > imgsz:
+            warnings.append("IMAGE_DOWNSCALED: small targets may be lost; no tiling")
+        return {
+            "schema_version": "ship-detection/0.1", "created_at": datetime.now(timezone.utc).isoformat(),
+            "image": {"file_name": None, "sha256": None,
+                      "width": image.width, "height": image.height, "mode": "RGB"},
+            "coordinates": {"unit": "pixel", "origin": "top-left", "x_axis": "right", "y_axis": "down",
+                            "polygon_order": "clockwise; start=min(y,x)", "space": "original_image",
+                            "clipped": False},
+            "model": dict(self.metadata),
+            "parameters": {"conf": conf, "iou": iou, "imgsz": imgsz, "max_det": max_det,
+                           "classes": self.ship_ids, "half": False, "augment": False, "tiling": False},
+            "timing_ms": {"model_load": self.load_ms, "decode": (inferred - started) * 1000,
+                          "predict_call": (inferred - started) * 1000,
+                          "total_before_save": (inferred - started) * 1000, "backend": backend},
             "count": len(detections), "warnings": warnings, "detections": detections,
         }
 
