@@ -1,0 +1,1016 @@
+openapi: 3.0.3
+info:
+  title: 遥感船舶检测与人机协同复核系统 API
+  version: 1.0.0
+  description: |
+    前端工作台使用的后端接口。所有路径以 `/api/v1` 为前缀。
+
+    设计约束（对应 docs/04-应用设计补充）：
+    - 所有资源绑定项目，服务端逐请求校验成员关系；前端隐藏按钮不算权限。
+    - 上传分为传输 / 校验 / 图像验证 / 预览四个状态，未就绪影像不能创建任务。
+    - 检测任务异步执行，进度来自真实切片记录，临时计数与最终计数分开发布。
+    - 模型原始结果不可变；人工修订写入草稿，提交后成为新版本。
+    - AI 候选在人工确认前不进入修订、统计与导出。
+    - 报告导出绑定版本，后续修订不改变旧报告。
+  license:
+    name: 未选定（项目尚未选择开源许可证）
+
+servers:
+  - url: http://127.0.0.1:8000/api/v1
+    description: 本地开发
+
+tags:
+  - name: auth
+  - name: projects
+  - name: uploads
+  - name: images
+  - name: tasks
+  - name: draft
+  - name: versions
+  - name: review
+  - name: ai
+  - name: exports
+  - name: ops
+
+security:
+  - bearerAuth: []
+
+paths:
+  /health:
+    get:
+      tags: [ops]
+      summary: 健康检查（无需鉴权）
+      security: []
+      responses:
+        '200':
+          description: 服务可用
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, enum: [ok, degraded] }
+                  mode: { type: string, example: mock }
+                  version: { type: string }
+
+  /auth/login:
+    post:
+      tags: [auth]
+      summary: 登录并进入指定项目
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, password, project_id]
+              properties:
+                username: { type: string, example: roxysunrise }
+                password: { type: string, format: password }
+                project_id: { type: string, example: harbor-a }
+      responses:
+        '200':
+          description: 登录成功
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [token, user]
+                properties:
+                  token: { type: string }
+                  user: { $ref: '#/components/schemas/User' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /auth/logout:
+    post:
+      tags: [auth]
+      summary: 退出登录并撤销会话
+      responses:
+        '204': { description: 已退出 }
+
+  /me:
+    get:
+      tags: [auth]
+      summary: 当前账号与所在项目
+      responses:
+        '200':
+          description: 当前用户
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/User' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /projects:
+    get:
+      tags: [projects]
+      summary: 当前账号可访问的项目
+      description: 只返回账号实际是成员的项目，不能由前端指定任意项目编号。
+      responses:
+        '200':
+          description: 项目列表
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Project' }
+
+  /projects/{project_id}:
+    get:
+      tags: [projects]
+      summary: 项目详情与成员
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+      responses:
+        '200':
+          description: 项目
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Project' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /projects/{project_id}/uploads:
+    post:
+      tags: [uploads]
+      summary: 创建可恢复上传会话
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [file_name]
+              properties:
+                file_name: { type: string }
+                size: { type: integer, format: int64, nullable: true }
+      responses:
+        '201':
+          description: 会话已创建
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Upload' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '413': { $ref: '#/components/responses/Error' }
+
+  /uploads/{upload_id}:
+    get:
+      tags: [uploads]
+      summary: 查询上传会话（用于续传与状态轮询）
+      parameters:
+        - $ref: '#/components/parameters/UploadId'
+      responses:
+        '200':
+          description: 会话状态
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Upload' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /uploads/{upload_id}/chunks/{index}:
+    put:
+      tags: [uploads]
+      summary: 上传单个分片
+      description: |
+        以服务端已接收的分片序号为准：重复提交同一分片不追加字节，
+        乱序提交返回 `409 CHUNK_OUT_OF_ORDER`。
+      parameters:
+        - $ref: '#/components/parameters/UploadId'
+        - name: index
+          in: path
+          required: true
+          schema: { type: integer, minimum: 0 }
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema: { type: string, format: binary }
+      responses:
+        '200':
+          description: 已接收
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  upload_id: { type: string }
+                  index: { type: integer }
+                  chunks_received: { type: integer }
+                  pct: { type: integer }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /uploads/{upload_id}/complete:
+    post:
+      tags: [uploads]
+      summary: 合并并校验
+      description: 校验长度与校验和，随后进入图像验证与预览生成；该接口立即返回，状态靠轮询。
+      parameters:
+        - $ref: '#/components/parameters/UploadId'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                sha256: { type: string, description: 客户端计算的整体校验和 }
+                size: { type: integer, format: int64 }
+      responses:
+        '200':
+          description: 已进入校验流程
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Upload' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/Error' }
+
+  /images/{image_id}:
+    get:
+      tags: [images]
+      summary: 影像记录与可分析状态
+      parameters:
+        - $ref: '#/components/parameters/ImageId'
+      responses:
+        '200':
+          description: 影像
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Image' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /projects/{project_id}/tasks:
+    post:
+      tags: [tasks]
+      summary: 创建检测任务
+      description: 影像必须处于 `ready` 状态，否则返回 `409 IMAGE_NOT_READY`。
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [image_id]
+              properties:
+                image_id: { type: string }
+                parameters: { $ref: '#/components/schemas/DetectionParameters' }
+      responses:
+        '201':
+          description: 任务已创建
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Task' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /tasks/{task_id}:
+    get:
+      tags: [tasks]
+      summary: 任务状态与进度
+      description: 前端按 `pollIntervalMs` 轮询本接口；`temp_count` 是临时值，`final_count` 仅在合并完成后出现。
+      parameters:
+        - $ref: '#/components/parameters/TaskId'
+      responses:
+        '200':
+          description: 任务
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Task' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /tasks/{task_id}/cancel:
+    post:
+      tags: [tasks]
+      summary: 请求取消
+      description: 在可终止边界生效；返回 `cancel_requested=true`，状态转 `cancelled` 需继续轮询。
+      parameters:
+        - $ref: '#/components/parameters/TaskId'
+      responses:
+        '200':
+          description: 已受理
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Task' }
+
+  /tasks/{task_id}/retry:
+    post:
+      tags: [tasks]
+      summary: 重试
+      description: 整次尝试重算，`attempt` 递增；中间结果按尝试编号隔离，不产生重复最终计数。
+      parameters:
+        - $ref: '#/components/parameters/TaskId'
+      responses:
+        '200':
+          description: 已重新排队
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Task' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /tasks/{task_id}/result:
+    get:
+      tags: [tasks]
+      summary: 最终检测结果
+      description: 仅任务完成时可用，否则 `409 RESULT_NOT_READY`。结构与 `contracts/ship-detection-v0.2.md` 一致。
+      parameters:
+        - $ref: '#/components/parameters/TaskId'
+      responses:
+        '200':
+          description: ship-detection/0.2
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DetectionResult' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /tasks/{task_id}/draft:
+    get:
+      tags: [draft]
+      summary: 读取工作副本
+      description: 草稿初始为 v0 的副本，是唯一可写的检测集合。
+      parameters:
+        - $ref: '#/components/parameters/TaskId'
+      responses:
+        '200':
+          description: 草稿
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  task_id: { type: string }
+                  detections:
+                    type: array
+                    items: { $ref: '#/components/schemas/Detection' }
+
+  /tasks/{task_id}/draft/detections:
+    post:
+      tags: [draft]
+      summary: 新增人工标注
+      parameters:
+        - $ref: '#/components/parameters/TaskId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [polygon]
+              properties:
+                polygon: { $ref: '#/components/schemas/Polygon' }
+                review_state: { $ref: '#/components/schemas/ReviewState' }
+                origin: { type: string, enum: [manual, ai] }
+                note: { type: string }
+      responses:
+        '201':
+          description: 已新增
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Detection' }
+        '422': { $ref: '#/components/responses/Error' }
+
+  /tasks/{task_id}/draft/detections/{detection_id}:
+    patch:
+      tags: [draft]
+      summary: 修改几何、复核状态或备注
+      description: 服务端重新规范化顶点顺序；`polygon` 必须是 4 个顶点。
+      parameters:
+        - $ref: '#/components/parameters/TaskId'
+        - name: detection_id
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                polygon: { $ref: '#/components/schemas/Polygon' }
+                review_state: { $ref: '#/components/schemas/ReviewState' }
+                note: { type: string, maxLength: 500 }
+      responses:
+        '200':
+          description: 修改后的目标
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Detection' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/Error' }
+
+  /tasks/{task_id}/draft/reset:
+    post:
+      tags: [draft]
+      summary: 用某个版本覆盖草稿
+      parameters:
+        - $ref: '#/components/parameters/TaskId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [version_id]
+              properties:
+                version_id: { type: string, example: v0 }
+      responses:
+        '200':
+          description: 重置后的草稿
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  task_id: { type: string }
+                  detections:
+                    type: array
+                    items: { $ref: '#/components/schemas/Detection' }
+
+  /tasks/{task_id}/draft/review-queue:
+    get:
+      tags: [review]
+      summary: 疑难复核队列
+      description: |
+        原因由服务端计算并给出可解释代码；排序分数只用于安排复核顺序，
+        **不能称为检测正确概率**。
+      parameters:
+        - $ref: '#/components/parameters/TaskId'
+      responses:
+        '200':
+          description: 队列与空区域抽样建议
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/ReviewItem' }
+                  sampling:
+                    type: array
+                    description: 无任何检测的 512 网格，建议人工抽查
+                    items:
+                      type: object
+                      properties:
+                        x: { type: integer }
+                        y: { type: integer }
+                        width: { type: integer }
+                        height: { type: integer }
+
+  /tasks/{task_id}/draft/regions:
+    post:
+      tags: [review]
+      summary: 区域盘点
+      description: 计数规则为**目标中心点落入区域**；重叠区域不直接相加。
+      parameters:
+        - $ref: '#/components/parameters/TaskId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [polygon]
+              properties:
+                name: { type: string }
+                polygon:
+                  type: array
+                  minItems: 3
+                  items:
+                    type: array
+                    items: { type: number }
+      responses:
+        '200':
+          description: 区域统计
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Region' }
+        '422': { $ref: '#/components/responses/Error' }
+
+  /tasks/{task_id}/versions:
+    get:
+      tags: [versions]
+      summary: 版本列表
+      parameters:
+        - $ref: '#/components/parameters/TaskId'
+      responses:
+        '200':
+          description: 版本（不含 detections）
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/VersionSummary' }
+    post:
+      tags: [versions]
+      summary: 提交草稿为新版本
+      description: 草稿与当前版本一致时返回 `409 NOTHING_TO_COMMIT`；v0 不可变。
+      parameters:
+        - $ref: '#/components/parameters/TaskId'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                label: { type: string, example: 人工修订 }
+      responses:
+        '201':
+          description: 新版本（含 detections）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Version' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /versions/{version_id}:
+    get:
+      tags: [versions]
+      summary: 版本详情（只读）
+      parameters:
+        - name: version_id
+          in: path
+          required: true
+          schema: { type: string, example: v0 }
+        - name: task_id
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: 版本
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Version' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /versions/{version_id}/exports:
+    post:
+      tags: [exports]
+      summary: 创建导出任务
+      parameters:
+        - name: version_id
+          in: path
+          required: true
+          schema: { type: string }
+        - name: task_id
+          in: query
+          required: true
+          schema: { type: string }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                formats:
+                  type: array
+                  items: { type: string, enum: [csv, json, png] }
+      responses:
+        '202':
+          description: 已受理，轮询 `/exports/{id}`
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Export' }
+
+  /exports/{export_id}:
+    get:
+      tags: [exports]
+      summary: 导出状态与下载地址
+      parameters:
+        - name: export_id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: 导出任务
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Export' }
+
+  /images/{image_id}/ai-candidates:
+    post:
+      tags: [ai]
+      summary: 生成 AI 标注候选
+      description: 候选未确认前不进入修订、统计与导出。失败返回 `422 NO_CANDIDATE`，前端应提示改用手动标注。
+      parameters:
+        - $ref: '#/components/parameters/ImageId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [point]
+              properties:
+                point:
+                  type: array
+                  minItems: 2
+                  maxItems: 2
+                  items: { type: number }
+                  description: 原图像素坐标
+                mode: { type: string, enum: [point, box] }
+                box:
+                  type: array
+                  items: { type: number }
+                  description: mode=box 时的框选范围 [x0,y0,x1,y1]
+      responses:
+        '200':
+          description: 候选
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Candidate' }
+        '422': { $ref: '#/components/responses/Error' }
+
+  /ai-candidates/{candidate_id}/accept:
+    post:
+      tags: [ai]
+      summary: 接受候选
+      description: 写入草稿，`origin=ai`、`confidence=null`（不伪造置信度），来源记录在 note。
+      parameters:
+        - name: candidate_id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: 新增的目标
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Detection' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /ai-candidates/{candidate_id}/cancel:
+    post:
+      tags: [ai]
+      summary: 取消候选
+      parameters:
+        - name: candidate_id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: 已取消
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: { type: string }
+                  status: { type: string, enum: [cancelled] }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+
+  parameters:
+    ProjectId:
+      name: project_id
+      in: path
+      required: true
+      schema: { type: string }
+    UploadId:
+      name: upload_id
+      in: path
+      required: true
+      schema: { type: string }
+    ImageId:
+      name: image_id
+      in: path
+      required: true
+      schema: { type: string }
+    TaskId:
+      name: task_id
+      in: path
+      required: true
+      schema: { type: string }
+
+  responses:
+    Error:
+      description: 统一错误信封
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Unauthorized:
+      description: 未认证或会话失效
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example:
+            error: { code: UNAUTHENTICATED, message: 会话已失效，请重新登录 }
+    Forbidden:
+      description: 不是项目成员
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example:
+            error: { code: PROJECT_FORBIDDEN, message: 你不是该项目成员，访问被拒绝 }
+    NotFound:
+      description: 资源不存在
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Conflict:
+      description: 状态冲突（重复提交、未就绪、顺序错误）
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              description: 稳定的机器可读错误码
+              example: IMAGE_NOT_READY
+            message:
+              type: string
+              description: 面向使用者的中文说明
+            details:
+              type: object
+              additionalProperties: true
+
+    User:
+      type: object
+      properties:
+        id: { type: string }
+        name: { type: string }
+        role: { type: string, enum: [项目负责人, 项目分析员] }
+        project:
+          type: object
+          properties:
+            id: { type: string }
+            name: { type: string }
+            code: { type: string }
+
+    Project:
+      type: object
+      properties:
+        id: { type: string }
+        name: { type: string }
+        code: { type: string }
+        members:
+          type: array
+          items:
+            type: object
+            properties:
+              id: { type: string }
+              name: { type: string }
+              role: { type: string }
+
+    Upload:
+      type: object
+      properties:
+        id: { type: string }
+        status:
+          type: string
+          enum: [uploading, verifying, ready, failed]
+        stage:
+          type: string
+          enum: [transport, merge, inspect, preview, ready]
+        chunk_size: { type: integer }
+        chunks_total: { type: integer }
+        chunks_received: { type: integer }
+        pct: { type: integer, minimum: 0, maximum: 100 }
+        image_id: { type: string, nullable: true }
+        error: { type: string, nullable: true }
+        expires_at: { type: string, format: date-time }
+
+    Image:
+      type: object
+      properties:
+        id: { type: string }
+        project_id: { type: string }
+        file_name: { type: string }
+        status: { type: string, enum: [uploading, verifying, ready, failed] }
+        sha256: { type: string }
+        width: { type: integer }
+        height: { type: integer }
+        mode: { type: string, example: RGB }
+        file_url: { type: string, description: 鉴权访问或短期签名链接 }
+        preview_url: { type: string }
+        created_at: { type: string, format: date-time }
+
+    DetectionParameters:
+      type: object
+      properties:
+        conf: { type: number, example: 0.25 }
+        iou: { type: number, example: 0.7 }
+        imgsz: { type: integer, example: 1024 }
+        max_det: { type: integer, example: 1000 }
+        tiling: { type: boolean, example: true }
+        tile_size: { type: integer, example: 1024 }
+        stride: { type: integer, example: 512 }
+        merge_iou: { type: number, example: 0.1 }
+
+    Task:
+      type: object
+      properties:
+        id: { type: string }
+        project_id: { type: string }
+        image_id: { type: string }
+        status:
+          type: string
+          enum: [queued, running, merging, done, cancelled, failed]
+        attempt: { type: integer }
+        tiles_total: { type: integer }
+        tiles_done: { type: integer }
+        temp_count: { type: integer, description: 临时计数，合并完成前有效 }
+        final_count: { type: integer, nullable: true, description: 最终计数，仅 done 后出现 }
+        parameters: { $ref: '#/components/schemas/DetectionParameters' }
+        cancel_requested: { type: boolean }
+        error: { type: string, nullable: true }
+        started_at: { type: string, format: date-time }
+        finished_at: { type: string, format: date-time, nullable: true }
+
+    Polygon:
+      type: array
+      description: 4 个顶点，原图像素坐标，顺时针，起点为最小 (y, x) 顶点
+      minItems: 4
+      maxItems: 4
+      items:
+        type: array
+        minItems: 2
+        maxItems: 2
+        items: { type: number }
+
+    ReviewState:
+      type: string
+      enum: [pending, confirmed, modified, deleted]
+
+    Detection:
+      type: object
+      properties:
+        id: { type: integer }
+        polygon: { $ref: '#/components/schemas/Polygon' }
+        class_id: { type: integer, example: 1 }
+        class_name: { type: string, example: ship }
+        confidence:
+          type: number
+          nullable: true
+          description: 人工或 AI 新增时为 null，不伪造置信度
+        source_tile_id: { type: integer }
+        review_state: { $ref: '#/components/schemas/ReviewState' }
+        origin: { type: string, enum: [model, manual, ai] }
+        note: { type: string }
+
+    Tile:
+      type: object
+      properties:
+        id: { type: integer }
+        x: { type: integer }
+        y: { type: integer }
+        width: { type: integer }
+        height: { type: integer }
+        candidate_count: { type: integer }
+        predict_ms: { type: number }
+
+    DetectionResult:
+      type: object
+      description: 与 contracts/ship-detection-v0.2.md 完全一致
+      properties:
+        schema_version: { type: string, example: ship-detection/0.2 }
+        created_at: { type: string, format: date-time }
+        image: { $ref: '#/components/schemas/Image' }
+        model:
+          type: object
+          additionalProperties: true
+        parameters: { $ref: '#/components/schemas/DetectionParameters' }
+        coordinates:
+          type: object
+          properties:
+            unit: { type: string, example: pixel }
+            origin: { type: string, example: top-left }
+            x_axis: { type: string, example: right }
+            y_axis: { type: string, example: down }
+            polygon_order: { type: string, example: 'clockwise; start=min(y,x)' }
+            space: { type: string, example: original_image }
+            clipped: { type: boolean }
+        tiling:
+          type: object
+          properties:
+            tile_count: { type: integer }
+            candidate_count: { type: integer }
+            suppressed_count: { type: integer }
+            merge_method: { type: string }
+            tiles:
+              type: array
+              items: { $ref: '#/components/schemas/Tile' }
+        count: { type: integer, description: 模型候选数量，不是人工确认数量 }
+        detections:
+          type: array
+          items: { $ref: '#/components/schemas/Detection' }
+
+    VersionSummary:
+      type: object
+      properties:
+        id: { type: string, example: v1 }
+        task_id: { type: string }
+        label: { type: string }
+        author: { type: string }
+        created_at: { type: string, format: date-time }
+        readonly: { type: boolean, description: v0 恒为 true }
+        summary:
+          type: object
+          nullable: true
+          properties:
+            added: { type: integer }
+            removed: { type: integer }
+            changed: { type: integer }
+            confirmed: { type: integer }
+            deleted: { type: integer }
+        counts:
+          type: object
+          properties:
+            total: { type: integer }
+            pending: { type: integer }
+            confirmed: { type: integer }
+            modified: { type: integer }
+            deleted: { type: integer }
+            added: { type: integer }
+
+    Version:
+      allOf:
+        - $ref: '#/components/schemas/VersionSummary'
+        - type: object
+          properties:
+            detections:
+              type: array
+              items: { $ref: '#/components/schemas/Detection' }
+
+    ReviewItem:
+      type: object
+      properties:
+        detection_id: { type: integer }
+        score: { type: integer, description: 排序分数，不是正确概率 }
+        reasons:
+          type: array
+          items:
+            type: object
+            properties:
+              code:
+                type: string
+                enum: [LOW_CONFIDENCE, TILE_BOUNDARY, IMAGE_EDGE, DUPLICATE]
+              message: { type: string }
+              partner_id: { type: integer, description: DUPLICATE 时给出配对目标 }
+              iou: { type: number }
+
+    Region:
+      type: object
+      properties:
+        id: { type: string }
+        name: { type: string }
+        polygon:
+          type: array
+          items:
+            type: array
+            items: { type: number }
+        rule: { type: string, example: centre_point_inside }
+        counts:
+          type: object
+          properties:
+            model: { type: integer }
+            effective: { type: integer }
+            deleted: { type: integer }
+            added: { type: integer }
+            delta: { type: integer }
+        area_px2: { type: integer }
+
+    Candidate:
+      type: object
+      properties:
+        id: { type: string }
+        image_id: { type: string }
+        status: { type: string, enum: [preview, accepted, cancelled, failed] }
+        polygon: { $ref: '#/components/schemas/Polygon' }
+        source: { type: string, example: prompt_segmentation }
+        width: { type: number }
+        length: { type: number }
+
+    Export:
+      type: object
+      properties:
+        id: { type: string }
+        version_id: { type: string }
+        status: { type: string, enum: [running, done, failed] }
+        files:
+          type: array
+          items:
+            type: object
+            properties:
+              format: { type: string, enum: [csv, json, png] }
+              name: { type: string }
+              url: { type: string, nullable: true, description: 短期签名链接 }
+              bytes: { type: integer }
+              error: { type: string, nullable: true }

@@ -2,13 +2,16 @@
 
 面向静态港口遥感影像，实现可靠上传、船舶旋转框检测、大图浏览、人工与 AI 辅助复核、区域统计、版本保存和导出。
 
-当前状态：已实现本地YOLOv8l-OBB单图推理最小模块，复用已有权重，CPU/GPU已实测；完整应用、服务部署及整体技术栈尚未完成或确定。
+当前状态：后端 `backend/`（业务 40 个端点 + 5 个推理端点）、算法 `algorithm/`
+（YOLOv8l-OBB 单图与大图切片）、前端 `frontend/`（登录页、工作台、检测页）均已就位，
+可用一条命令在本机跑通「登录 → 上传 → 检测 → 复核 → 统计 → 导出」。
+**未合入 main、未部署**；项目训练权重不入库，需自行放置。
 
-检测模块现增加[大图推理模式](contracts/ship-detection-v0.2.md)：重叠切片、四点坐标还原和跨片多边形NMS；通过`predict_large()`或CLI `--tiled`调用。它属于同一检测模块，验证流程不等于精度提升。
+一键启动、账号与自检见[快速开始](docs/quickstart.md)：`scripts/start-dev.ps1`。
 
-## 本地检测模块
-
-启动、依赖、样例与限制见[算法模块说明](algorithm/README.md)，输出见[检测契约v0.1提案](contracts/ship-detection-v0.1.md)，交付状态见[模块控制文档](docs/module-controls/ship-detection.md)。准备本地权重、环境与样例后运行 `scripts/run-detection.ps1 -Image datasets/smoke/dense.png -Device 0`，CPU用 `-Device cpu`。权重、影像、数据集与虚拟环境不入Git。
+检测模块另有大图推理模式（重叠切片、四点坐标还原、跨片多边形 NMS），见
+[检测契约 v0.2](contracts/ship-detection-v0.2.md)；启动、依赖与限制见
+[算法模块说明](algorithm/README.md)。
 
 ## 协作入口
 
@@ -16,6 +19,7 @@
 - [邀请 B 方与权限管理](docs/邀请B方与权限管理.md)
 - [模块交付模板](docs/模块交付模板.md)
 - [接口约定目录](contracts/README.md)
+- [前端演示与登录模块](frontend/README.md)
 
 本仓库最新分工：A 负责业务后端、算法、存储及大图编辑核心组件；B 负责前端页面、交互与集成。旧职责文档中 B 承担业务后端的条款已由本轮协作约定调整；旧文档原件未修改，也未复制入仓库。
 
