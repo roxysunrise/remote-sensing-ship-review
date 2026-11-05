@@ -388,3 +388,19 @@ table.tbl tr:hover td { background: rgba(22, 33, 44, .6); }
   .wb-side.right { width: 232px; flex-basis: 232px; }
   .grid-3 { grid-template-columns: 1fr 1fr; }
 }
+
+/* ---------- 项目库列表（影像 / 任务）：服务端真实数据，点击进入 ---------- */
+.lib { display: flex; flex-direction: column; gap: 3px; }
+.lib-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 7px 9px; border-radius: 7px;
+  border: 1px solid transparent; cursor: pointer;
+  transition: background .15s ease, border-color .15s ease;
+}
+.lib-row:hover { background: rgba(74, 158, 255, .10); border-color: rgba(74, 158, 255, .35); }
+.lib-row:focus-visible { outline: 2px solid var(--accent-2); outline-offset: 1px; }
+.lib-name {
+  flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--tx);
+}
+.lib-row .dim { font-size: 11.5px; white-space: nowrap; }

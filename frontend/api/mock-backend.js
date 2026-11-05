@@ -358,6 +358,35 @@
         return { id: p.id, name: p.name, code: p.code, members: clone(p.members) };
       },
 
+      /* --- 项目库：影像与任务列表（对齐后端 /projects/{id}/images|tasks） --- */
+      async listImages(projectId) {
+        await net();
+        requireProject(projectId);
+        const items = Object.values(db.images)
+          .filter(i => i.project_id === projectId)
+          .sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')))
+          .map(i => clone(i));
+        return { project_id: projectId, total: items.length, items };
+      },
+
+      async listTasks(projectId, params) {
+        await net();
+        requireProject(projectId);
+        const p = params || {};
+        let rows = Object.values(db.tasks).filter(t => t.project_id === projectId);
+        if (p.status) rows = rows.filter(t => t.status === p.status);
+        if (p.image_id) rows = rows.filter(t => t.image_id === p.image_id);
+        rows.sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')));
+        rows = rows.slice(0, p.limit || 50);
+        const items = rows.map(t => {
+          const img = db.images[t.image_id] || {};
+          return Object.assign(taskView(t), {
+            image: { id: t.image_id, file_name: img.file_name, width: img.width, height: img.height }
+          });
+        });
+        return { project_id: projectId, total: items.length, items };
+      },
+
       /* --- uploads --- */
       async createUpload(projectId, body) {
         await net();

@@ -60,7 +60,7 @@
       <span class="chip">接口 <b id="ctx-api">—</b></span>
     </div>
     <div class="top-right">
-      <span class="badge demo" title="上传、任务进度与 AI 候选为前端模拟；坐标、几何与统计口径按真实契约实现">演示数据</span>
+      <span class="badge" id="mode-badge" title="数据来源：真实后端 / 浏览器内模拟">…</span>
       <span class="chip" id="ctx-user">—</span>
       <button class="btn ghost sm" id="btn-logout">退出</button>
     </div>
@@ -96,7 +96,7 @@
                 <dt>项目名称</dt><dd id="pj-name">港口巡查 A 区</dd>
                 <dt>项目编号</dt><dd class="mono">PRJ-A-0271</dd>
                 <dt>当前角色</dt><dd id="pj-role">项目分析员</dd>
-                <dt>影像数量</dt><dd>1 幅（harbor.png，2305 × 1537）</dd>
+                <dt>影像数量</dt><dd id="pj-images">—</dd>
                 <dt>检测任务</dt><dd id="pj-task">未创建</dd>
                 <dt>存储</dt><dd>私有对象存储 · 项目内可见</dd>
               </dl>
@@ -124,12 +124,12 @@
 
           <div class="grid-3" style="margin-top:14px">
             <div class="card">
-              <h3>影像 <span class="tag">真实契约</span></h3>
-              <div class="mono" style="font-size:11.5px;color:var(--tx-2);line-height:1.9">
-                harbor.png<br>
-                2305 × 1537 · RGB<br>
-                <span class="dim">sha256</span> <span id="pj-sha">—</span>
+              <h3>项目影像 <span class="tag" id="pj-image-count">服务端列表</span></h3>
+              <div id="pj-image-list" class="lib" style="font-size:12px">
+                <div class="dim" style="padding:6px 0">加载中…</div>
               </div>
+              <div class="hr"></div>
+              <div class="mono dim" style="font-size:11px">sha256 <span id="pj-sha">—</span></div>
             </div>
             <div class="card">
               <h3>检测结果 <span class="tag model">模型原始</span></h3>
@@ -137,6 +137,11 @@
                 <div class="s"><b id="pj-count">—</b><span>模型候选</span></div>
                 <div class="s"><b id="pj-cand">—</b><span>合并前候选</span></div>
                 <div class="s"><b id="pj-tiles">—</b><span>切片数</span></div>
+              </div>
+              <div class="hr"></div>
+              <h3 style="font-size:12px;margin-bottom:8px">检测任务</h3>
+              <div id="pj-task-list" class="lib" style="font-size:12px">
+                <div class="dim" style="padding:6px 0">加载中…</div>
               </div>
             </div>
             <div class="card">

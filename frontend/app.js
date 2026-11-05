@@ -37,6 +37,8 @@ const state = {
 
   image: null,
   task: null,
+  images: [],            // 项目影像列表（服务端），刷新后据此恢复
+  tasks: [],             // 项目任务列表（服务端）
   result: null,          // ship-detection/0.2 结果（只读）
   versions: [],          // 版本列表（不含 detections）
   draft: [],             // 服务端草稿
@@ -825,7 +827,7 @@ async function pollUpload(uploadId) {
       u.stage = 'ready';
       u.pct = 100;
       renderUpload();
-      renderProject();
+      await loadLibrary();      // 新影像立刻出现在项目影像列表里
       toast('影像已通过验证，可以创建检测任务', 'ok');
       return;
     }
@@ -1325,18 +1327,142 @@ function renderReview() {
 
 /* ------------------------------------------------------------------ projects */
 
+/* --------------------------------------------------------------- library */
+
+const TASK_STATUS_LABEL = {
+  queued: '排队中', running: '运行中', merging: '合并中',
+  done: '已完成', cancelled: '已取消', failed: '失败'
+};
+
+/** 顶部徽章如实反映数据来源：真实后端还是浏览器内模拟 */
+function renderModeBadge() {
+  const el = $('#mode-badge');
+  if (!el) return;
+  if (API.mode === 'http') {
+    el.textContent = '真实后端';
+    el.className = 'badge confirmed';
+    el.title = '接口 ' + API.baseUrl;
+  } else {
+    el.textContent = '演示数据';
+    el.className = 'badge demo';
+    el.title = '当前为浏览器内模拟后端；把 config.js 的 apiMode 改成 http 可接真实服务';
+  }
+}
+
+/** 拉取项目的影像与任务列表（03 §2.1/2.2：刷新或重新进入后要能找回已有数据） */
+async function loadLibrary() {
+  if (!state.project || !state.project.id) return;
+  try {
+    const [images, tasks] = await Promise.all([
+      API.listImages(state.project.id),
+      API.listTasks(state.project.id, { limit: 20 })
+    ]);
+    state.images = images.items || [];
+    state.tasks = tasks.items || [];
+  } catch (err) {
+    state.images = [];
+    state.tasks = [];
+    if (API.mode === 'http') toastError(err);
+  }
+  renderProject();
+}
+
+/** 打开一幅影像：优先载入已完成任务，其次接上运行中的任务 */
+async function openImage(imageId) {
+  await action(async () => {
+    state.image = await API.getImage(imageId);
+    const mine = state.tasks.filter(t => t.image_id === imageId);
+    const done = mine.find(t => t.status === 'done');
+    const running = mine.find(t => ['queued', 'running', 'merging'].includes(t.status));
+    if (done) {
+      state.task = await API.getTask(done.id);
+      await loadResult();
+      switchView('workbench');
+      toast('已载入该影像最近的完成结果', 'ok');
+      return;
+    }
+    if (running) {
+      state.task = await API.getTask(running.id);
+      switchView('task');
+      renderTask();
+      pollTask();
+      return;
+    }
+    state.task = null;
+    switchView('task');
+    renderTask();
+    toast('这幅影像还没有检测任务，可以直接创建', 'ok');
+  });
+}
+
+/** 打开一个已有任务 */
+async function openTask(taskId) {
+  await action(async () => {
+    state.task = await API.getTask(taskId);
+    try { state.image = await API.getImage(state.task.image_id); } catch (_) { /* 用列表里的摘要即可 */ }
+    if (state.task.status === 'done') {
+      await loadResult();
+      switchView('workbench');
+      return;
+    }
+    switchView('task');
+    renderTask();
+    if (['queued', 'running', 'merging'].includes(state.task.status)) pollTask();
+  });
+}
+
+function renderLibrary() {
+  const imgBox = $('#pj-image-list');
+  if (imgBox) {
+    imgBox.innerHTML = state.images.length
+      ? state.images.map(i => `
+        <div class="lib-row" data-image="${i.id}" role="button" tabindex="0">
+          <span class="lib-name">${i.file_name}</span>
+          <span class="dim">${i.width} × ${i.height}</span>
+          <span class="dim">${i.bytes ? (i.bytes / 1048576).toFixed(2) + ' MB' : '—'}</span>
+        </div>`).join('')
+      : '<div class="dim" style="padding:6px 0">还没有影像，先去「上传」导入。</div>';
+    imgBox.querySelectorAll('[data-image]').forEach(el => {
+      el.onclick = () => openImage(el.dataset.image);
+    });
+  }
+
+  const taskBox = $('#pj-task-list');
+  if (taskBox) {
+    taskBox.innerHTML = state.tasks.length
+      ? state.tasks.map(t => `
+        <div class="lib-row" data-task="${t.id}" role="button" tabindex="0">
+          <span class="lib-name">${(t.image && t.image.file_name) || t.image_id}</span>
+          <span class="tag ${t.status === 'done' ? 'confirmed' : ''}">${TASK_STATUS_LABEL[t.status] || t.status}</span>
+          <span class="dim">${t.tiles_done}/${t.tiles_total} 片 · ${t.final_count == null ? '—' : t.final_count} 框</span>
+        </div>`).join('')
+      : '<div class="dim" style="padding:6px 0">还没有检测任务。</div>';
+    taskBox.querySelectorAll('[data-task]').forEach(el => {
+      el.onclick = () => openTask(el.dataset.task);
+    });
+  }
+}
+
 function renderProject() {
   const p = state.project;
   if (!p) return;
   $('#pj-name').textContent = p.name;
   $('#pj-role').textContent = state.user.role;
   $('#pj-task').textContent = state.task
-    ? ({ running: '运行中', done: '已完成', cancelled: '已取消', merging: '合并中' }[state.task.status] || state.task.status)
+    ? (TASK_STATUS_LABEL[state.task.status] || state.task.status)
     : '未创建';
-  $('#pj-sha').textContent = SCENE.image.sha256.slice(0, 16) + '…';
-  $('#pj-count').textContent = state.baseline.length || SCENE.count;
-  $('#pj-cand').textContent = state.result ? state.result.tiling.candidate_count : SCENE.tiling.candidate_count;
-  $('#pj-tiles').textContent = tilesNow().length;
+
+  const current = state.image || state.images[0] || null;
+  const imagesEl = $('#pj-images');
+  if (imagesEl) {
+    imagesEl.textContent = state.images.length
+      ? `${state.images.length} 幅` + (current ? `（${current.file_name}，${current.width} × ${current.height}）` : '')
+      : '尚无影像';
+  }
+  $('#pj-sha').textContent = current && current.sha256 ? current.sha256.slice(0, 16) + '…' : '—';
+  $('#pj-count').textContent = state.baseline.length;
+  $('#pj-cand').textContent = state.result ? state.result.tiling.candidate_count : 0;
+  $('#pj-tiles').textContent = state.result ? tilesNow().length : 0;
   $('#pj-members').innerHTML = p.members.map(m => `
     <div class="member">
       <div class="avatar">${m.name.slice(0, 1).toUpperCase()}</div>
@@ -1344,6 +1470,7 @@ function renderProject() {
         <div class="dim" style="font-size:11.5px">${m.role}</div></div>
       <span class="tag">${m.role === '项目负责人' ? '管理' : '读写'}</span>
     </div>`).join('');
+  renderLibrary();
 }
 
 /* ---------------------------------------------------------------------- nav */
@@ -1407,8 +1534,9 @@ async function restoreSession() {
   $('#ctx-project').textContent = pj.name || pj.id || '—';
   $('#login').classList.add('hidden');
   $('#app').classList.remove('hidden');
+  renderModeBadge();
+  await loadLibrary();
   switchView('project');
-  renderProject();
   renderUpload();
   renderTask();
   renderExport();
@@ -1431,6 +1559,8 @@ async function doLogin(username, password, projectId) {
     renderUpload();
     renderTask();
     renderExport();
+    renderModeBadge();
+    await loadLibrary();
     toast(`已登录：${state.user.name}（${state.user.role}）`, 'ok');
   });
 }
@@ -1516,6 +1646,7 @@ async function boot() {
   renderUpload();
   renderTask();
   renderExport();
+  renderModeBadge();
   const mode = API.mode === 'mock' ? 'mock（浏览器内模拟）' : API.baseUrl;
   $('#ctx-api').textContent = mode;
   $('#ctx-api').title = API.mode === 'mock'
