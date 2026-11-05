@@ -94,6 +94,16 @@
       listProjects: () => request('GET', '/projects'),
       getProject: id => request('GET', `/projects/${encodeURIComponent(id)}`),
 
+      // 项目级列表：刷新或重新进入时要能找回已有影像和任务（03 §2.1/2.2）
+      listImages: projectId => request('GET', `/projects/${encodeURIComponent(projectId)}/images`),
+      listTasks: (projectId, params) => {
+        const q = new URLSearchParams();
+        if (params && params.status) q.set('status', params.status);
+        if (params && params.image_id) q.set('image_id', params.image_id);
+        q.set('limit', String((params && params.limit) || 50));
+        return request('GET', `/projects/${encodeURIComponent(projectId)}/tasks?${q.toString()}`);
+      },
+
       createUpload: (projectId, body) => request('POST', `/projects/${encodeURIComponent(projectId)}/uploads`, body),
       putChunk: (uploadId, index, bytes) => request('PUT', `/uploads/${encodeURIComponent(uploadId)}/chunks/${index}`, bytes),
       getUpload: uploadId => request('GET', `/uploads/${encodeURIComponent(uploadId)}`),

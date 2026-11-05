@@ -1,13 +1,15 @@
 /* 检测工作台运行时配置。
  *
- * 后端就绪后只改这里（或加 ?api=http 临时切换）：
- *   mode: 'mock' → 浏览器内启发式实现，离线可跑，只用于演示交互与接口形状
- *         'http' → 真实推理服务，按 api/DETECT_API.md 与 detect-openapi.yaml 实现
+ * 默认接真实推理服务（A 侧 `backend/vision.py`）。配合 `scripts/serve.py` 同源反代，
+ * baseUrl 留空即可；后端独立部署时填完整地址并确保允许 CORS。
+ *
+ *   mode: 'http' → 真实推理服务，按 api/DETECT_API.md 与 detect-openapi.yaml 实现（默认）
+ *         'mock' → 浏览器内启发式实现，离线可跑，只用于演示交互与接口形状
  *
  * 前端不直接调用模型；所有检测 / AI 分割请求都经过 window.DetectAPI。
  */
 window.DETECT_CONFIG = {
-  mode: 'mock',
+  mode: 'http',
 
   // 留空表示与页面同源；跨域部署时填写服务地址，并确保服务端允许 CORS
   baseUrl: '',

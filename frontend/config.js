@@ -1,13 +1,17 @@
-/* 运行时配置。后端就绪后只改这里。
+/* 运行时配置。
  *
- * apiMode: 'mock' → 浏览器内模拟后端（默认，离线可用）
- *          'http' → 真实后端，按 api/openapi.yaml 实现
+ * 默认接真实后端（A 侧 `backend/`）。推荐用 `scripts/start-dev.ps1` 启动：
+ * 它用 `scripts/serve.py` 把页面和 `/api/v1` 挂在同一个 origin 下，
+ * 因此 `baseUrl` 留空即可，不需要改端口也不需要 CORS。
+ *
+ * apiMode: 'http' → 真实后端，按 api/openapi.yaml 实现（默认）
+ *          'mock' → 浏览器内模拟后端，离线可用，仅用于界面演示
  */
 window.APP_CONFIG = {
-  apiMode: 'mock',
+  apiMode: 'http',
 
-  // 真实后端地址；留空表示与前端同源（推荐，避免 CORS）
-  baseUrl: 'http://127.0.0.1:8000',
+  // 留空表示与页面同源（推荐）；后端独立部署在不同 origin 时填完整地址
+  baseUrl: '',
   apiPrefix: '/api/v1',
 
   // 轮询间隔（毫秒）。任务进度与导出状态都用它。
