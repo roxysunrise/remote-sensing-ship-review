@@ -110,6 +110,8 @@
       completeUpload: (uploadId, body) => request('POST', `/uploads/${encodeURIComponent(uploadId)}/complete`, body || {}),
 
       getImage: id => request('GET', `/images/${encodeURIComponent(id)}`),
+      // 大图显示金字塔：层级、块数、瓦片 URL 模板（z=0 为原图 1:1）
+      getTileManifest: id => request('GET', `/images/${encodeURIComponent(id)}/tile-manifest`),
 
       createTask: (projectId, body) => request('POST', `/projects/${encodeURIComponent(projectId)}/tasks`, body),
       getTask: id => request('GET', `/tasks/${encodeURIComponent(id)}`),

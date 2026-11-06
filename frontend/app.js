@@ -18,6 +18,7 @@ const clone = o => JSON.parse(JSON.stringify(o));
 const G = window.GEOM;
 const CFG = window.APP_CONFIG;
 const SCENE = window.SCENE;          // 仅用于影像尺寸等静态元信息与演示提示
+const TILE_VIEW = window.TileView;   // A 方大图复核核心：后端显示瓦片层
 
 const IMG_W = SCENE.image.width;
 const IMG_H = SCENE.image.height;
@@ -126,6 +127,9 @@ class Viewport {
     this.ctx = canvas.getContext('2d');
     this.mode = opts.mode || 'edit';
     this.scale = 0.3; this.ox = 0; this.oy = 0;
+    // 每个视口有自己的原图尺寸：工作台跟随真实影像，统计页仍用演示场景
+    this.worldW = IMG_W; this.worldH = IMG_H;
+    this.tileLayer = null;
     this.drag = null; this.needFit = true;
     this.onDraw = opts.onDraw || (() => {});
     this.bind();
@@ -142,9 +146,9 @@ class Viewport {
   }
   fit() {
     if (!this.w) return;
-    this.scale = Math.min(this.w / IMG_W, this.h / IMG_H) * 0.96;
-    this.ox = (this.w - IMG_W * this.scale) / 2;
-    this.oy = (this.h - IMG_H * this.scale) / 2;
+    this.scale = Math.min(this.w / this.worldW, this.h / this.worldH) * 0.96;
+    this.ox = (this.w - this.worldW * this.scale) / 2;
+    this.oy = (this.h - this.worldH * this.scale) / 2;
     this.needFit = false;
   }
   zoomAt(sx, sy, factor) {
@@ -209,9 +213,12 @@ class Viewport {
     const { ctx } = this;
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     ctx.clearRect(0, 0, this.w, this.h);
-    if (IMG.complete && IMG.naturalWidth) {
+    if (this.tileLayer) {
+      // 后端显示瓦片：预览垫底，视口内按层取块，坐标仍是原图像素
+      this.tileLayer.draw(ctx, this);
+    } else if (IMG.complete && IMG.naturalWidth) {
       ctx.imageSmoothingEnabled = this.scale < 1;
-      ctx.drawImage(IMG, this.ox, this.oy, IMG_W * this.scale, IMG_H * this.scale);
+      ctx.drawImage(IMG, this.ox, this.oy, this.worldW * this.scale, this.worldH * this.scale);
     }
     this.onDraw(ctx, this);
   }
@@ -222,9 +229,121 @@ function redraw() {
   if (ST.vp && state.view === 'stats') ST.vp.draw();
 }
 
+/* --------------------------------------------------------------- tile layer */
+
+/** 后端私有影像要带会话令牌，不能直接用 <img src> 取。 */
+async function authImage(url) {
+  const target = TILE_VIEW.authenticatedImageUrl(url, API.baseUrl, location.href);
+  const headers = {};
+  const token = window.AuthSession ? AuthSession.token() : (localStorage.getItem('dsh.ship.token') || '');
+  if (token) headers.Authorization = 'Bearer ' + token;
+  return fetch(target, { headers, credentials: 'same-origin', redirect: 'error' })
+    .then(res => {
+      if (!res.ok) throw new Error('HTTP ' + res.status + ' ' + url);
+      return res.blob();
+    })
+    .then(blob => new Promise((resolve, reject) => {
+      const objectUrl = URL.createObjectURL(blob);
+      const image = new Image();
+      image.decoding = 'async';
+      image.onload = () => { URL.revokeObjectURL(objectUrl); resolve(image); };
+      image.onerror = () => { URL.revokeObjectURL(objectUrl); reject(new Error('影像解码失败')); };
+      image.src = objectUrl;
+    }));
+}
+
+/** manifest 给的是 /tiles/...，业务 API 挂在 /api/v1 下。 */
+function resolveTileTemplate(template) {
+  if (!template) return '';
+  if (/^(?:[a-z][a-z\d+.-]*:|\/\/)/i.test(template)) return template;
+  const base = (CFG.baseUrl || '').replace(/\/$/, '');
+  if (template.indexOf('/api/') === 0) return base + template;
+  return (API.baseUrl || base + (CFG.apiPrefix || '/api/v1')) + template;
+}
+
+function scheduleWorkbenchDraw() {
+  if (WB.tileFrame) return;
+  WB.tileFrame = requestAnimationFrame(() => {
+    WB.tileFrame = 0;
+    if (state.view === 'workbench' && WB.vp) WB.vp.draw();
+  });
+}
+
+/** 任务对应的影像摘要：state.image 是首选，取详情失败时退回项目影像列表。 */
+function workbenchImageInfo() {
+  const wanted = state.task && state.task.image_id;
+  if (wanted) {
+    if (state.image && state.image.id === wanted) return state.image;
+    const fromList = state.images.find(item => item.id === wanted);
+    if (fromList) return fromList;
+  }
+  return state.image;
+}
+
+/**
+ * 工作台换图：把原图尺寸交给视口，并为真实后端挂上瓦片层。
+ * 瓦片/预览都是异步的，先用预览垫底；失败时保留预览，不把演示影像当真实影像。
+ */
+function prepareWorkbenchImage() {
+  const info = workbenchImageInfo();
+  if (!info || !WB.vp) return;
+  const width = Number(info.width);
+  const height = Number(info.height);
+  const vp = WB.vp;
+  if (width > 0 && height > 0 && (vp.worldW !== width || vp.worldH !== height)) {
+    vp.worldW = width;
+    vp.worldH = height;
+    vp.needFit = true;
+  }
+  if (API.mode !== 'http' || !TILE_VIEW || !info.id) return;
+
+  const imageKey = info.id + '@' + (info.sha256 || '');
+  if (WB.imageKey === imageKey) return;
+  vp.needFit = true;
+  WB.imageKey = imageKey;
+  const token = ++WB.imageToken;
+
+  if (!WB.tileLayer) {
+    WB.tileLayer = new TILE_VIEW.TileLayer({
+      requestLimit: 16,
+      loadTile: ({ url }) => authImage(url),
+      onUpdate: scheduleWorkbenchDraw
+    });
+  }
+  vp.tileLayer = WB.tileLayer;
+  WB.tileLayer.reset();
+
+  authImage(API.baseUrl + '/previews/' + encodeURIComponent(info.id))
+    .then(image => {
+      if (token !== WB.imageToken) return;
+      WB.tileLayer.setPreview(image);
+      scheduleWorkbenchDraw();
+    })
+    .catch(error => {
+      if (token !== WB.imageToken) return;
+      console.warn('工作台预览加载失败', error);
+      scheduleWorkbenchDraw();
+    });
+
+  API.getTileManifest(info.id)
+    .then(manifest => {
+      if (token !== WB.imageToken || !manifest) return;
+      WB.tileLayer.configure(manifest, { urlTemplate: resolveTileTemplate(manifest.url_template) });
+      scheduleWorkbenchDraw();
+    })
+    .catch(error => {
+      if (token !== WB.imageToken) return;
+      console.warn('工作台瓦片清单加载失败', error);
+      scheduleWorkbenchDraw();
+    });
+}
+
 /* ------------------------------------------------------------------ workbench */
 
-const WB = { vp: null, drag: null, gesture: null, before: null };
+const WB = {
+  vp: null, drag: null, gesture: null, before: null,
+  tileLayer: null, imageKey: null, imageToken: 0, tileFrame: 0
+};
 
 function initWorkbench() {
   WB.vp = new Viewport($('#wb-canvas'), { mode: 'edit' });
@@ -1482,6 +1601,7 @@ function switchView(name) {
 
   if (name === 'workbench') {
     if (!WB.vp) initWorkbench();
+    prepareWorkbenchImage();
     requestAnimationFrame(() => {
       if (WB.vp.resize() && WB.vp.needFit) WB.vp.fit();
       WB.vp.draw();
