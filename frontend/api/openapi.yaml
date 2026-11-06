@@ -812,8 +812,9 @@ components:
         classes:
           type: array
           nullable: true
-          items: { type: integer }
-          description: 省略或 null 使用全部模型类别。项目工作台当前显式传 [1]，对当前 DOTA 权重表示只检测船舶。
+          minItems: 1
+          items: { type: integer, minimum: 0 }
+          description: 省略或 null 使用全部模型类别，空数组无效。项目工作台当前显式传 [1]，对当前 DOTA 权重表示只检测船舶。
           example: [1]
         classes_filtered: { type: boolean, readOnly: true, description: 结果是否显式按类别过滤 }
         tiling: { type: boolean, example: true }
