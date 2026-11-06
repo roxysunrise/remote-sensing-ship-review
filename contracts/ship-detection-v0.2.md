@@ -22,9 +22,15 @@ CLI：`python -m algorithm.ship_detector harbor.png --tiled --tile-size 1024 --s
 | merge_iou | (0,1]，默认0.1；全图多边形NMS阈值，IoU严格大于阈值时抑制；1关闭额外抑制 |
 | iou | 仍为模型内部逐片后处理阈值，与merge_iou不同，默认0.7 |
 | max_det | 1–10000，**每个切片**的模型数量上限；不是全图上限，达到时警告 |
+| classes | `null`（默认）= 不做类别过滤，输出模型全部类别（本权重为 DOTA-v1 的 15 类）；传类别 id 列表则只输出这些类，例如 `[1]` 只出船。列表为空、含非整数或超出模型类别范围时返回 INVALID_ARGUMENT |
 | conf/imgsz | 沿用v0.1范围；imgsz小于切片时仍可能损失小目标 |
 
+> **变更（2026-11-06）**：`classes` 从「固定只输出 ship」改为调用方可控，默认全类。
+> 原因：模型是 15 类 OBB，固定只输出 ship 会让网球场地、棒球场、卡车场等影像返回 0 个框。
+> 需要原来的单类行为时显式传 `classes=[1]`。
+
 非tiled CLI传入非默认切片参数返回INVALID_ARGUMENT，避免静默忽略。成功退出0、失败退出2，错误信封沿用v0.1。
+CLI 用 `--classes all`（默认）或 `--classes 1,3`。
 
 ## 切片、坐标和合并
 

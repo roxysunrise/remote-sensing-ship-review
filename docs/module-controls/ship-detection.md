@@ -1,6 +1,36 @@
 # 船舶检测控制文档
 
-## 当前增量：大图推理增强（2026-10-29）
+## 当前增量：类别不再固定为 ship（2026-11-06）
+
+- 问题：`ShipDetector` 与 `/vision/detect` 把 `classes` 固定成 `[ship]`。权重本身是 DOTA-v1 的 15 类 OBB，
+  导致网球场、棒球场、卡车场等影像返回 **0 个框**，只有港口图有框。用户提供的四张实测影像已复现。
+- 范围：`algorithm/ship_detector.py`、`algorithm/tiled_inference.py`、`backend/detector.py`、`backend/vision.py`、
+  `backend/ai_assist.py`、`backend/api.py`、`backend/jobs.py`、`frontend/detect.js`、两份检测契约、
+  `frontend/api/DETECT_API.md`、新增两个验证脚本。无训练、无 Worker/存储/权限改动。
+- 行为：
+  - `classes` 默认 `None` = 输出模型全部类别；传 id 列表才过滤（`[1]` 即旧行为）。
+  - `parameters.classes` 记录本次实际生效类别，并新增 `parameters.classes_filtered`。
+  - `/vision/detect` 响应新增 `by_class`、`detections[].class_id`、`model.classes`、`model.classes_filtered`。
+  - `save_result` 叠框文字用真实 `class_name`；草稿/AI 候选入库不再把类别兜底成 `ship`。
+  - 前端检测层按类别着色（15 类调色板 + 未知类名哈希取色），`|| 'ship'` 兜底改为 `|| 'object'`。
+- 验证（本地 CPU；ultralytics 8.4.203 / torch 2.15.0+cpu；权重 sha256 `6508d583…3cd26f`；
+  `python -m scripts.verify_multiclass --conf 0.25`，imgsz 按图最大边对齐，与 `/vision/detect` 一致）：
+
+  | 影像 | 修复后（全类） | 修复前（`classes=[1]`） |
+  |---|---|---|
+  | 网球场群 1298×1415 | 15：tennis-court=14, soccer-ball-field=1 | 0 |
+  | 棒球场+篮球场 1403×881 | 10：small-vehicle=5, tennis-court=2, basketball-court=2, baseball-diamond=1 | 0 |
+  | 卡车场 1466×956 | 130：small-vehicle=71, large-vehicle=59 | 0 |
+  | 游艇港 1500×1125 | 108：ship=63, harbor=37, small-vehicle=8 | 63 |
+
+  HTTP 端到端（`python -m scripts.verify_multiclass_http --dir <影像目录>`，TestClient 走真实
+  `POST /vision/detect`）：4/4 影像出现非 ship 类别；显式 `options.classes=[1]` 时网球场图回到 0 且
+  `classes_filtered=true`。单测 `python -m unittest discover -s tests -v` → 78 项通过。
+- 未验证：未在 GPU 或生产服务实测；未重新评估多类场景的精度（逐类 mAP 见权重页 `per_class_metrics.csv`）；
+  前端只做了静态改动与逻辑核对，未起浏览器联调；大图（>6000px）缩放到 1600 导致的漏检不在本次范围。
+- Git：分支 `codex/multi-class-detect`，基线 `codex/integration`；提交与 PR 见本轮上传记录。
+
+## 上一增量：大图推理增强（2026-10-29）
 
 - 同一模块ID ship-detection，A负责；新增predict_large/CLI --tiled，复用原模型，不建立另一个业务模块。
 - 本轮范围：固定尺寸重叠切片、原图四点坐标还原、按类别多边形NMS、参数与计数/耗时、正常空失败样例及验证；无训练、Worker、HTTP或业务修改。

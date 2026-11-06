@@ -89,9 +89,10 @@ class ShipDetector:
             raise DetectionError("MODEL_LOAD_FAILED", "Cannot load weights with this Ultralytics environment") from exc
         if self.model.task != "obb":
             raise DetectionError("INCOMPATIBLE_MODEL", "An OBB model is required")
+        # 模型是 15 类 OBB（DOTA-v1），早先只输出 ship。这里保留 ship_ids 供业务侧默认值使用，
+        # 但不再强制要求模型必须含 ship 类：`classes=None` 表示输出全部类别。
+        self.all_ids = sorted(int(i) for i in self.model.names)
         self.ship_ids = [int(i) for i, name in self.model.names.items() if name.lower() == "ship"]
-        if not self.ship_ids:
-            raise DetectionError("MISSING_SHIP_CLASS", "Model class names must include ship")
         self.metadata = {
             "backend": "ultralytics", "task": "obb", "weights_file": self.weights.name,
             "architecture": type(self.model.model).__name__,
@@ -106,19 +107,44 @@ class ShipDetector:
         self.load_ms = (time.perf_counter() - start) * 1000
 
     @staticmethod
-    def validate_parameters(conf, iou, imgsz, max_det):
+    def validate_parameters(conf, iou, imgsz, max_det, classes=None, known_ids=None):
         if not all(isinstance(v, Real) and not isinstance(v, bool) and math.isfinite(v) and 0 < v <= 1 for v in (conf, iou)):
             raise DetectionError("INVALID_ARGUMENT", "conf and iou must be in (0, 1]")
         if isinstance(imgsz, bool) or not isinstance(imgsz, int) or not 32 <= imgsz <= 2048 or imgsz % 32:
             raise DetectionError("INVALID_ARGUMENT", "imgsz must be a multiple of 32 from 32 to 2048")
         if isinstance(max_det, bool) or not isinstance(max_det, int) or not 1 <= max_det <= 10000:
             raise DetectionError("INVALID_ARGUMENT", "max_det must be an integer from 1 to 10000")
+        if classes is not None:
+            if isinstance(classes, (str, bytes)) or not isinstance(classes, (list, tuple, set, frozenset)):
+                raise DetectionError("INVALID_ARGUMENT", "classes must be a list of class ids, or null for all classes")
+            ids = list(classes)
+            if not ids:
+                raise DetectionError("INVALID_ARGUMENT", "classes must not be empty; use null for all classes")
+            for value in ids:
+                if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+                    raise DetectionError("INVALID_ARGUMENT", "classes entries must be non-negative integers")
+            if known_ids is not None:
+                unknown = sorted({i for i in ids if i not in set(known_ids)})
+                if unknown:
+                    raise DetectionError(
+                        "INVALID_ARGUMENT",
+                        f"classes contains ids outside the model class list: {unknown}")
 
-    def _infer_image(self, image: Image.Image, *, conf, iou, imgsz, max_det):
-        """Shared sequential model call; coordinates refer to this decoded PIL image."""
+    def _effective_classes(self, classes):
+        """实际生效的类别列表，用于写入 parameters（None 表示全类）。"""
+        if classes is not None:
+            return [int(c) for c in classes]
+        return list(getattr(self, "all_ids", None) or getattr(self, "ship_ids", []))
+
+    def _infer_image(self, image: Image.Image, *, conf, iou, imgsz, max_det, classes=None):
+        """Shared sequential model call; coordinates refer to this decoded PIL image.
+
+        `classes=None` 时不向模型传类别过滤，返回全部 15 类；传列表则只返回这些类。
+        """
         try:
             result = self.model.predict(source=image, device=self.device, conf=conf, iou=iou,
-                                        imgsz=imgsz, max_det=max_det, classes=self.ship_ids,
+                                        imgsz=imgsz, max_det=max_det,
+                                        classes=None if classes is None else list(classes),
                                         augment=False, save=False, verbose=False)[0]
         except self.torch.OutOfMemoryError as exc:
             raise DetectionError("OUT_OF_MEMORY", "Insufficient memory; use CPU or reduce imgsz") from exc
@@ -139,27 +165,29 @@ class ShipDetector:
     def predict_large(self, image_path: str | Path, *, tile_size: int = 1024,
                       stride: int = 512, merge_iou: float = 0.1, conf: float = 0.25,
                       iou: float = 0.7, imgsz: int = 1024, max_det: int = 1000,
-                      on_progress=None, should_cancel=None, tile_lock=None) -> dict:
+                      classes=None, on_progress=None, should_cancel=None, tile_lock=None) -> dict:
         """Tiled inference in original pixels; see ship-detection v0.2 contract.
 
+        `classes=None` 输出全部类别；传类别 id 列表则只输出这些类。
         `on_progress`、`should_cancel` 和 `tile_lock` 是可选集成钩子，供任务运行时做进度、
         取消与片间让锁；不传时行为与之前完全一致。
         """
         from .tiled_inference import predict_large
         return predict_large(self, image_path, tile_size=tile_size, stride=stride,
                              merge_iou=merge_iou, conf=conf, iou=iou,
-                             imgsz=imgsz, max_det=max_det,
+                             imgsz=imgsz, max_det=max_det, classes=classes,
                              on_progress=on_progress, should_cancel=should_cancel,
                              tile_lock=tile_lock)
 
     def predict(self, image_path: str | Path, *, conf: float = 0.25, iou: float = 0.7,
-                imgsz: int = 1024, max_det: int = 1000) -> dict:
-        """Return JSON-compatible ship detections in ORIGINAL image pixels."""
-        self.validate_parameters(conf, iou, imgsz, max_det)
+                imgsz: int = 1024, max_det: int = 1000, classes=None) -> dict:
+        """Return JSON-compatible detections in ORIGINAL image pixels."""
+        self.validate_parameters(conf, iou, imgsz, max_det, classes, getattr(self, "all_ids", None))
         started = time.perf_counter()
         image = read_image(image_path)
         decoded = time.perf_counter()
-        detections, backend = self._infer_image(image, conf=conf, iou=iou, imgsz=imgsz, max_det=max_det)
+        detections, backend = self._infer_image(image, conf=conf, iou=iou, imgsz=imgsz,
+                                                max_det=max_det, classes=classes)
         inferred = time.perf_counter()
         warnings = []
         if len(detections) >= max_det:
@@ -175,7 +203,9 @@ class ShipDetector:
                             "clipped": False},
             "model": dict(self.metadata),
             "parameters": {"conf": conf, "iou": iou, "imgsz": imgsz, "max_det": max_det,
-                           "classes": self.ship_ids, "half": False, "augment": False, "tiling": False},
+                           "classes": self._effective_classes(classes),
+                           "classes_filtered": classes is not None,
+                           "half": False, "augment": False, "tiling": False},
             "timing_ms": {"model_load": self.load_ms, "decode": (decoded - started) * 1000,
                           "predict_call": (inferred - decoded) * 1000,
                           "total_before_save": (time.perf_counter() - started) * 1000,
@@ -185,17 +215,18 @@ class ShipDetector:
 
 
     def predict_image(self, image: Image.Image, *, conf: float = 0.25, iou: float = 0.7,
-                      imgsz: int = 1024, max_det: int = 1000) -> dict:
+                      imgsz: int = 1024, max_det: int = 1000, classes=None) -> dict:
         """在已解码的内存图像上推理：不落盘、不做文件哈希。
 
         供 `/vision/detect` 这类短请求使用：调用方已经解码并校验过，重复写盘和重算 SHA256
         是纯浪费。结果结构与 `predict()` 一致，只是 `image.file_name` / `image.sha256` 为 None。
         """
-        self.validate_parameters(conf, iou, imgsz, max_det)
+        self.validate_parameters(conf, iou, imgsz, max_det, classes, getattr(self, "all_ids", None))
         if getattr(image, "mode", None) != "RGB":
             raise DetectionError("INVALID_IMAGE", "Image must decode as RGB")
         started = time.perf_counter()
-        detections, backend = self._infer_image(image, conf=conf, iou=iou, imgsz=imgsz, max_det=max_det)
+        detections, backend = self._infer_image(image, conf=conf, iou=iou, imgsz=imgsz,
+                                                max_det=max_det, classes=classes)
         inferred = time.perf_counter()
         warnings = []
         if len(detections) >= max_det:
@@ -211,7 +242,9 @@ class ShipDetector:
                             "clipped": False},
             "model": dict(self.metadata),
             "parameters": {"conf": conf, "iou": iou, "imgsz": imgsz, "max_det": max_det,
-                           "classes": self.ship_ids, "half": False, "augment": False, "tiling": False},
+                           "classes": self._effective_classes(classes),
+                           "classes_filtered": classes is not None,
+                           "half": False, "augment": False, "tiling": False},
             "timing_ms": {"model_load": self.load_ms, "decode": (inferred - started) * 1000,
                           "predict_call": (inferred - started) * 1000,
                           "total_before_save": (inferred - started) * 1000, "backend": backend},
@@ -232,7 +265,9 @@ def save_result(result: dict, image_path: str | Path, output_dir: str | Path) ->
         points = [tuple(p) for p in detection["polygon"]]
         draw.line(points + [points[0]], fill=(255, 50, 30), width=2)
         x, y = points[0]
-        draw.text((max(0, x), max(0, y)), f'{detection["id"]} ship {detection["confidence"]:.2f}', fill=(255, 255, 0))
+        draw.text((max(0, x), max(0, y)),
+                  f'{detection["id"]} {detection.get("class_name", "object")} {detection["confidence"]:.2f}',
+                  fill=(255, 255, 0))
     preview_path = directory / "preview.png"
     json_path = directory / "result.json"
     if Path(image_path).resolve() == preview_path.resolve():
@@ -253,6 +288,8 @@ def main(argv=None) -> int:
     parser.add_argument("--iou", type=float, default=0.7)
     parser.add_argument("--imgsz", type=int, default=1024)
     parser.add_argument("--max-det", type=int, default=1000)
+    parser.add_argument("--classes", default="all",
+                        help='all（默认，输出全部类别）或逗号分隔的类别 id，例如 "1" 只输出船')
     parser.add_argument("--tiled", action="store_true", help="Use overlapping tiles and polygon NMS")
     parser.add_argument("--tile-size", type=int, default=1024)
     parser.add_argument("--stride", type=int, default=512)
@@ -262,19 +299,32 @@ def main(argv=None) -> int:
         read_image(args.image, max_pixels=MAX_LARGE_PIXELS if args.tiled else MAX_PIXELS).close()
         if not args.tiled and (args.tile_size != 1024 or args.stride != 512 or args.merge_iou != 0.1):
             raise DetectionError("INVALID_ARGUMENT", "Tile options require --tiled")
-        ShipDetector.validate_parameters(args.conf, args.iou, args.imgsz, args.max_det)
+        raw_classes = str(args.classes).strip().lower()
+        if raw_classes in {"all", "", "none", "*"}:
+            classes = None
+        else:
+            try:
+                classes = [int(v) for v in raw_classes.replace(" ", "").split(",") if v != ""]
+            except ValueError as exc:
+                raise DetectionError("INVALID_ARGUMENT", "--classes must be 'all' or comma-separated ids") from exc
+        ShipDetector.validate_parameters(args.conf, args.iou, args.imgsz, args.max_det, classes)
         if args.tiled:
             from .tiled_inference import validate_tiling
             validate_tiling(args.tile_size, args.stride, args.merge_iou)
         detector = ShipDetector(args.weights, args.device)
-        options = dict(conf=args.conf, iou=args.iou, imgsz=args.imgsz, max_det=args.max_det)
+        options = dict(conf=args.conf, iou=args.iou, imgsz=args.imgsz, max_det=args.max_det,
+                       classes=classes)
         if args.tiled:
             result = detector.predict_large(args.image, tile_size=args.tile_size, stride=args.stride,
                                             merge_iou=args.merge_iou, **options)
         else:
             result = detector.predict(args.image, **options)
         paths = save_result(result, args.image, args.output)
-        print(json.dumps({"ok": True, "count": result["count"], **paths}, ensure_ascii=False))
+        by_class = {}
+        for det in result["detections"]:
+            by_class[det["class_name"]] = by_class.get(det["class_name"], 0) + 1
+        print(json.dumps({"ok": True, "count": result["count"], "by_class": by_class, **paths},
+                         ensure_ascii=False))
         return 0
     except DetectionError as exc:
         print(json.dumps({"ok": False, "error": {"code": exc.code, "message": str(exc)}}, ensure_ascii=False), file=sys.stderr)
