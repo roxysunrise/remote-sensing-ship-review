@@ -27,6 +27,27 @@ def _align(value: int, low: int = 32, high: int = 2048) -> int:
     return max(low, min(high, int(math.ceil(value / 32.0) * 32)))
 
 
+def _parse_classes(raw):
+    """options.classes → None（全部类别）或类别 id 列表。
+
+    支持：缺省/null、"all"、[1, 3]、"1,3"。非法值交给算法层报 INVALID_ARGUMENT。
+    """
+    if raw is None:
+        return None
+    if isinstance(raw, str):
+        text = raw.strip().lower()
+        if text in {"", "all", "*", "none"}:
+            return None
+        raw = [v for v in text.replace(" ", "").split(",") if v != ""]
+    if not isinstance(raw, (list, tuple, set, frozenset)):
+        raise errors.invalid("INVALID_ARGUMENT", "classes 必须是类别 id 列表，或省略表示全部类别")
+    try:
+        ids = [int(v) for v in raw]
+    except (TypeError, ValueError) as exc:
+        raise errors.invalid("INVALID_ARGUMENT", "classes 必须是整数类别 id") from exc
+    return ids or None
+
+
 def _request_image(payload: dict) -> Image.Image:
     image_bytes = imaging.decode_data_url(((payload or {}).get("image") or {}).get("data_url"))
     return imaging.load_request_image(image_bytes)
@@ -76,6 +97,8 @@ def detect(payload: dict = Body(default_factory=dict)) -> dict:
             # 不再二次下采样：imgsz 对齐到当前帧的最大边（上限 2048）
             "imgsz": _align(max(image.width, image.height)),
             "max_det": int(options.get("max_det", 200)),
+            # classes 缺省 = 输出模型全部类别（DOTA-v1 共 15 类）；传 [1] 才退回只出船
+            "classes": _parse_classes(options.get("classes")),
         }
         result = detector.service.predict_image(image, params)
     finally:
@@ -93,10 +116,14 @@ def _finish_detect(result: dict, frame: dict, request_id: str, elapsed_ms: float
     sx = target_width / width if width else 1.0
     sy = target_height / height if height else 1.0
     detections = []
+    by_class: dict[str, int] = {}
     for index, det in enumerate(result["detections"], 1):
+        label = det.get("class_name") or "object"
+        by_class[label] = by_class.get(label, 0) + 1
         detections.append({
             "id": f"d{index}",
-            "label": det.get("class_name", "ship"),
+            "label": label,
+            "class_id": det.get("class_id"),
             "score": round(float(det["confidence"]), 4) if det.get("confidence") is not None else None,
             "polygon": [[round(x * sx, 3), round(y * sy, 3)] for x, y in det["polygon"]],
             "source": "model",
@@ -107,9 +134,12 @@ def _finish_detect(result: dict, frame: dict, request_id: str, elapsed_ms: float
         "frame": {"index": int(frame.get("index") or 0), "time_ms": int(frame.get("time_ms") or 0),
                   "width": target_width, "height": target_height},
         "model": {"name": "yolov8l-obb", "version": result.get("schema_version", "ship-detection/0.1"),
-                  "device": model.get("device_name") or model.get("device")},
+                  "device": model.get("device_name") or model.get("device"),
+                  "classes": (result.get("parameters") or {}).get("classes"),
+                  "classes_filtered": (result.get("parameters") or {}).get("classes_filtered", False)},
         "elapsed_ms": elapsed_ms,
         "count": len(detections),
+        "by_class": by_class,
         "detections": detections,
     }
 
@@ -165,7 +195,9 @@ def segment(payload: dict = Body(default_factory=dict)) -> dict:
             "mode": mode,
             "plan": plan_record or None,
             "candidates": [
-                {"id": f"c{index}", "label": "ship", "quality": item["quality"],
+                {"id": f"c{index}", "label": item.get("label") or "object",
+                 "class_id": item.get("class_id"),
+                 "quality": item["quality"],
                  "confidence": None, "source": item["source"],
                  "polygon": [[round(x / sx, 3), round(y / sy, 3)] for x, y in item["polygon"]],
                  "reason": item["reason"]}

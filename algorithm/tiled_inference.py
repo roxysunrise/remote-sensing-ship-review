@@ -86,16 +86,17 @@ def polygon_nms(detections, threshold):
 
 
 def predict_large(detector, image_path, *, tile_size, stride, merge_iou, conf, iou, imgsz, max_det,
-                  on_progress=None, should_cancel=None, tile_lock=None):
+                  classes=None, on_progress=None, should_cancel=None, tile_lock=None):
     """Tiled inference. `on_progress(tile_id, tile_total, candidate_count)` is optional and does not
     change results; `should_cancel()` is polled only at tile boundaries, so cancellation is never
     observed inside a model call and never produces a partial result.
 
+    `classes=None` 表示不做类别过滤（输出模型全部类别）；传 id 列表则只保留这些类。
     `tile_lock` 只包住单片的模型调用，让调用方能在片间把 GPU 让给别的请求；
     不传时行为与之前完全一致。
     """
     validate_tiling(tile_size, stride, merge_iou)
-    detector.validate_parameters(conf, iou, imgsz, max_det)
+    detector.validate_parameters(conf, iou, imgsz, max_det, classes, getattr(detector, "all_ids", None))
     started = time.perf_counter()
     image = read_image(image_path, max_pixels=MAX_LARGE_PIXELS)
     try:
@@ -110,7 +111,8 @@ def predict_large(detector, image_path, *, tile_size, stride, merge_iou, conf, i
             try:
                 with guard:
                     with image.crop(box) as crop:
-                        detections, _ = detector._infer_image(crop, conf=conf, iou=iou, imgsz=imgsz, max_det=max_det)
+                        detections, _ = detector._infer_image(crop, conf=conf, iou=iou, imgsz=imgsz,
+                                                               max_det=max_det, classes=classes)
             except DetectionError as exc:
                 raise DetectionError(exc.code, f"Tile {tile_id}: {exc}") from exc
             if len(candidates) + len(detections) > MAX_CANDIDATES:
@@ -145,7 +147,10 @@ def predict_large(detector, image_path, *, tile_size, stride, merge_iou, conf, i
                             "polygon_order": "clockwise; start=min(y,x)", "space": "original_image", "clipped": False},
             "model": dict(detector.metadata),
             "parameters": {"conf": conf, "iou": iou, "imgsz": imgsz, "max_det": max_det,
-                           "classes": detector.ship_ids, "half": False, "augment": False, "tiling": True,
+                           "classes": (list(classes) if classes is not None
+                                       else list(getattr(detector, "all_ids", None) or getattr(detector, "ship_ids", []))),
+                           "classes_filtered": classes is not None,
+                           "half": False, "augment": False, "tiling": True,
                            "tile_size": tile_size, "stride": stride, "merge_iou": merge_iou},
             "tiling": {"tile_count": len(tiles), "candidate_count": len(candidates),
                        "suppressed_count": len(candidates) - len(detections),

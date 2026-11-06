@@ -213,8 +213,8 @@ def _model_detection(det: dict) -> dict:
     return {
         "id": det["id"],
         "polygon": det["polygon"],
-        "class_id": det.get("class_id", 1),
-        "class_name": det.get("class_name", "ship"),
+        "class_id": det.get("class_id"),
+        "class_name": det.get("class_name") or "object",
         "confidence": det.get("confidence"),
         "source_tile_id": det.get("source_tile_id"),
         "review_state": det.get("review_state", "pending"),

@@ -80,6 +80,8 @@ def _detect_candidates(service, crop, left: int, top: int, conf: float) -> list[
         polygon = [[x + left, y + top] for x, y in det["polygon"]]
         out.append({
             "polygon": geometry.normalize_polygon(polygon),
+            "label": det.get("class_name") or "object",
+            "class_id": det.get("class_id"),
             "quality": round(float(det["confidence"]), 4),
             "source": "detect",
             "reason": "局部高分辨率检测命中",
@@ -106,6 +108,8 @@ def _contour_candidate(crop, left: int, top: int) -> dict | None:
     fill = area / max(1.0, w * h)
     return {
         "polygon": geometry.normalize_polygon(polygon),
+        "label": "object",
+        "class_id": None,
         "quality": round(min(0.75, 0.35 + 0.4 * fill), 4),
         "source": "contour",
         "reason": "经典阈值轮廓兜底（非语义分割）",

@@ -1,5 +1,22 @@
 # 后端 API（对接 B 方前端） 控制文档
 
+## 增量：`/vision/detect` 多类别（2026-11-06）
+
+- 问题：`/vision/detect` 把 `classes` 固定成 `[ship]`（`detector.predict_image` → `ShipDetector` 内部写死），
+  15 类权重只输出 1 类；网球场地、棒球场、卡车场影像一律返回 0 个框，只有港口图有框。
+- 改动：`backend/vision.py` 新增 `_parse_classes`（缺省/`null`/`"all"` → 全类；列表或 `"1,3"` → 过滤），
+  `detect` 透传 `classes`；响应新增 `by_class`、`detections[].class_id`、`model.classes`、
+  `model.classes_filtered`，`label` 不再兜底成 `ship`；`segment` 的候选 `label`/`class_id` 取自真实检测结果；
+  `detector.py` 的 `_tiling_keys` 增加 `classes`；`ai_assist.py` 候选带上 `label`/`class_id`；
+  `api.py`、`jobs.py` 草稿与 AI 候选入库不再把类别写死成 `1 / "ship"`。
+- 兼容：不传 `classes` 的老调用方现在会收到全部类别（这是本次修复的目的）；需要旧行为显式传 `[1]`。
+  `by_class`/`class_id` 为新增字段，不影响既有消费者。
+- 验证：`python -m scripts.verify_multiclass_http --dir <影像目录>`（TestClient 走真实 `/vision/detect`），
+  4/4 影像出现非 ship 类别（网球场 15、棒球场 10、卡车场 131、港口 105）；
+  显式 `classes=[1]` 时网球场图回到 0 且 `classes_filtered=true`。单测 78 项通过。
+- 未验证：未在 GPU / 生产服务实测；大图缩放到 1600 的漏检不在本次范围。
+- Git：分支 `codex/multi-class-detect`，基线 `codex/integration`。
+
 ## 身份与状态
 
 - 模块 ID：`backend-api`；A 主责（工程骨架 + 计算接入），业务页面与业务数据模型由 B 方提出并确认。

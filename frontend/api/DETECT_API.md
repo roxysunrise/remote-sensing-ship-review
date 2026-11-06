@@ -103,7 +103,7 @@ window.DETECT_CONFIG = {
   "point": [900, 50],                      // segment 专用，roi 为空时使用
   "prompt": "船舶",
   "mode": "roi",                           // "roi" | "point" | "full"
-  "options": { "conf": 0.25, "max_det": 80 }
+  "options": { "conf": 0.25, "max_det": 80, "classes": null }
 }
 ```
 
@@ -113,6 +113,9 @@ window.DETECT_CONFIG = {
 - 视频由前端抽帧后发送，不要求服务端解码视频；如果后端希望直接收视频流，
   可以新增 `POST /vision/video/jobs`，但当前界面只依赖逐帧接口。
 - `roi` 是 `[x0, y0, x1, y1]`，允许反向（前端已排序，服务端仍应兼容）。
+- `options.classes`：省略或 `null` = **输出模型全部类别**（本权重 DOTA-v1 共 15 类）；
+  传 `[1]` 这类类别 id 列表则只输出这些类。历史实现在此固定只输出 ship，
+  导致网球场、棒球场、卡车场等影像返回 0 个框；2026-11-06 起改为默认全类。
 
 ### 3.2 DetectResponse
 
@@ -120,13 +123,19 @@ window.DETECT_CONFIG = {
 {
   "request_id": "req_9f2c1a",
   "frame": { "index": 60, "time_ms": 2000 },
-  "model": { "name": "yolov8l-obb", "version": "ship-0.2", "device": "cuda:0" },
+  "model": {
+    "name": "yolov8l-obb", "version": "ship-detection/0.1", "device": "cpu",
+    "classes": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14],
+    "classes_filtered": false
+  },
   "elapsed_ms": 84.2,
   "count": 2,
+  "by_class": { "ship": 1, "tennis-court": 1 },
   "detections": [
     {
       "id": "d1",
       "label": "ship",
+      "class_id": 1,
       "score": 0.91,
       "polygon": [[885.0, 37.3], [953.3, 39.5], [952.9, 52.2], [884.6, 50.0]],
       "source": "model"
@@ -134,6 +143,10 @@ window.DETECT_CONFIG = {
   ]
 }
 ```
+
+`label` 是模型类别名（`class_name`），`class_id` 为原模型编号，两者都可直接用于筛选与上色。
+`by_class` 是按类别聚合的计数，便于前端显示"检出 tennis-court ×11"这类汇总；
+`model.classes_filtered=true` 表示本次做了类别过滤。
 
 - `polygon` 至少 3 点；4 点按旋转框显示，>4 点按多边形显示。
 - `score` 是模型置信度；前端列表显示两位小数，详情显示三位。

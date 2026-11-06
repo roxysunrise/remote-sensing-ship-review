@@ -520,8 +520,37 @@
     return ordered.slice(first).concat(ordered.slice(0, first));
   }
 
+  // DOTA-v1 15 类调色板；模型返回的每个检测按类别着色，未知类别按名字哈希取色
+  const CLASS_COLORS = {
+    ship: '#1f9bd1',
+    plane: '#e0a300',
+    'storage-tank': '#7f5bd1',
+    'baseball-diamond': '#c8553d',
+    'tennis-court': '#2f9e6f',
+    'basketball-court': '#d163a0',
+    'ground-track-field': '#4a7fd1',
+    harbor: '#0f7d8c',
+    bridge: '#8c6d3f',
+    'large-vehicle': '#5f8f2f',
+    'small-vehicle': '#9d6bd0',
+    helicopter: '#d1483f',
+    roundabout: '#c98a1e',
+    'soccer-ball-field': '#3aa06c',
+    'swimming-pool': '#2f8fd1'
+  };
+
+  function classColor(label) {
+    const key = String(label || '').toLowerCase();
+    if (CLASS_COLORS[key]) return CLASS_COLORS[key];
+    let h = 0;
+    for (let i = 0; i < key.length; i++) h = (h * 31 + key.charCodeAt(i)) % 360;
+    return 'hsl(' + h + ', 62%, 46%)';
+  }
+
   function itemColor(item) {
-    return item.held ? COLORS.held : (COLORS[item.origin] || COLORS.manual);
+    if (item.held) return COLORS.held;
+    if (item.origin === 'model' && item.label) return classColor(item.label);
+    return COLORS[item.origin] || COLORS.manual;
   }
 
   function itemScore(item) {
@@ -607,7 +636,7 @@
     const tl = toScreen(bb[0], bb[1]);
     let text = '#' + item.id;
     if (S.show.labels) {
-      text += ' ' + (item.label || 'ship');
+      text += ' ' + (item.label || 'object');
       if (item.origin === 'model' && Number.isFinite(item.score)) text += ' ' + fmt(item.score, 2);
       if (item.origin === 'ai' && Number.isFinite(item.quality)) text += ' Q' + fmt(item.quality, 2);
       if (item.held) text += ' · 沿用';
@@ -1128,7 +1157,7 @@
     const cx = x + w / 2, cy = y + h / 2;
     const item = {
       id: nextId('a'),
-      label: 'ship',
+      label: 'object',
       origin: 'manual',
       shape: 'box',
       polygon: boxPolygon(cx, cy, w, h, 0),
@@ -1164,7 +1193,7 @@
     }
     const item = {
       id: nextId('a'),
-      label: 'ship',
+      label: 'object',
       origin: 'manual',
       shape: 'polygon',
       polygon: orderPolygon(pts),
@@ -1331,7 +1360,7 @@
       : (typeof d.confidence === 'number' ? d.confidence : null);
     return {
       id: d.id ? 'm' + String(d.id) : 'm' + idx + '_' + (i + 1),
-      label: d.label || 'ship',
+      label: d.label || 'object',
       origin: 'model',
       shape: poly.length === 4 ? 'box' : 'polygon',
       polygon: poly,
@@ -1400,7 +1429,7 @@
         image: { data_url: frame.data_url, width: frame.width, height: frame.height },
         roi: opts.roi || null,
         point: opts.point || null,
-        prompt: S.ai.prompt || 'ship',
+        prompt: S.ai.prompt || 'object',
         mode: opts.roi ? 'roi' : 'point',
         options: { conf: 0.25 }
       });
@@ -1440,7 +1469,7 @@
     const poly = cand.polygon.map(p => clampPoint(p));
     const item = {
       id: nextId('a'),
-      label: cand.label || S.ai.prompt || 'ship',
+      label: cand.label || S.ai.prompt || 'object',
       origin: 'ai',
       shape: poly.length === 4 ? 'box' : 'polygon',
       polygon: orderPolygon(poly),
@@ -1545,13 +1574,13 @@
     } else {
       els.list.innerHTML = items.map(it => {
         const bb = window.GEOM.bbox(it.polygon);
-        const title = (it.label || 'ship') + ' · ' + itemScore(it) +
+        const title = (it.label || 'object') + ' · ' + itemScore(it) +
           ' · ' + fmt(bb[0], 0) + ',' + fmt(bb[1], 0);
         return '<div class="dt-item' + (it.id === S.selectedId ? ' sel' : '') +
           (it.held ? ' held' : '') + '" data-id="' + esc(it.id) + '" title="' + esc(title) + '">' +
           '<span class="sw" style="background:' + itemColor(it) + '"></span>' +
           '<span class="id">' + esc(it.id) + '</span>' +
-          '<span class="lb">' + esc(it.label || 'ship') + '</span>' +
+          '<span class="lb">' + esc(it.label || 'object') + '</span>' +
           '<span class="src">' + (ORIGIN_LABEL[it.origin] || it.origin) + '</span>' +
           '<span class="cf">' + itemScore(it) + '</span>' +
           '</div>';
@@ -1634,7 +1663,7 @@
 
     els.detail.innerHTML =
       '<dl class="dt-kv">' +
-      '<dt>标签</dt><dd>' + esc(item.label || 'ship') + '</dd>' +
+      '<dt>标签</dt><dd>' + esc(item.label || 'object') + '</dd>' +
       '<dt>形状</dt><dd>' + (item.shape === 'box' ? '旋转框' : '多边形') + '</dd>' +
       '<dt>来源</dt><dd>' + source + '</dd>' +
       '<dt>帧</dt><dd>' + frameLine + '</dd>' +
