@@ -809,6 +809,13 @@ components:
         iou: { type: number, example: 0.7 }
         imgsz: { type: integer, example: 1024 }
         max_det: { type: integer, example: 1000 }
+        classes:
+          type: array
+          nullable: true
+          items: { type: integer }
+          description: 省略或 null 使用全部模型类别。项目工作台当前显式传 [1]，对当前 DOTA 权重表示只检测船舶。
+          example: [1]
+        classes_filtered: { type: boolean, readOnly: true, description: 结果是否显式按类别过滤 }
         tiling: { type: boolean, example: true }
         tile_size: { type: integer, example: 1024 }
         stride: { type: integer, example: 512 }

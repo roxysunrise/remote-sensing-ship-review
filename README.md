@@ -8,6 +8,7 @@
 **未合入 main、未部署**；项目训练权重不入库，需自行放置。
 
 一键启动、账号与自检见[快速开始](docs/quickstart.md)：`scripts/start-dev.ps1`。
+A/B 交付版本、权重校验与复跑步骤见[联合验收候选基线](docs/validation/ab-acceptance-baseline.md)。
 
 检测模块另有大图推理模式（重叠切片、四点坐标还原、跨片多边形 NMS），见
 [检测契约 v0.2](contracts/ship-detection-v0.2.md)；启动、依赖与限制见
