@@ -503,7 +503,7 @@ with patch.object(worker, "_ensure_v0", side_effect=lambda *args, **kwargs: os._
             if case == "wrong_image":
                 result["image"]["sha256"] = "wrong"
             if case == "bad_detection":
-                result["detections"][0]["polygon"] = [[1, 1]]
+                result["detections"][0]["polygon"] = [[1, 1]] * 4
             target.write_text(json.dumps(result), encoding="utf-8")
             if case == "existing":
                 self._seed_v0(task_id, [_fake_detection(2)])

@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import json
 import logging
-import math
 import queue
 import sqlite3
 import threading
@@ -16,6 +15,7 @@ import traceback
 from pathlib import Path
 
 from algorithm.errors import DetectionError
+from algorithm.ship_detector import canonical_polygon
 from algorithm.tiled_inference import plan_tiles
 
 from . import config, db, detector, errors, storage
@@ -66,7 +66,7 @@ class TaskRuntime:
         for row in rows:
             try:
                 payload = _read_legacy_result(row)
-            except (OSError, ValueError, TypeError, KeyError, RuntimeError, OverflowError):
+            except (DetectionError, OSError, ValueError, TypeError, KeyError, RuntimeError, OverflowError):
                 log.warning("任务 %s 的历史结果不可验证，跳过 v0 恢复", row["id"])
                 continue
             with db.tx() as conn:
@@ -266,9 +266,9 @@ def _read_legacy_result(row: sqlite3.Row) -> dict:
         polygon = detection["polygon"]
         if not isinstance(polygon, list) or len(polygon) != 4 or any(
             not isinstance(point, list) or len(point) != 2
-            or any(type(value) not in (int, float) or not math.isfinite(value) for value in point)
+            or any(type(value) not in (int, float) for value in point)
             for point in polygon
-        ):
+        ) or canonical_polygon(polygon) != polygon:
             raise ValueError("result detection polygon")
         if (type(detection["class_id"]) is not int or not isinstance(detection["class_name"], str)
                 or type(detection["confidence"]) not in (int, float)
