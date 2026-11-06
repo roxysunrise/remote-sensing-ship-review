@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import queue
+import sqlite3
 import threading
 import traceback
 from pathlib import Path
@@ -130,12 +131,16 @@ class TaskRuntime:
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
-        db.execute(
-            "UPDATE tasks SET status='done', final_count=?, temp_count=?, result_path=?,"
-            " finished_at=? WHERE id=? AND attempt=?",
-            (payload["count"], payload["count"], str(target), db.now(), task_id, attempt),
-        )
-        self._ensure_v0(task_id, payload, actor=row["created_by"])
+        # 状态与 v0 同时提交，避免重启后留下可读结果却无基线版本的任务。
+        with db.tx() as conn:
+            updated = conn.execute(
+                "UPDATE tasks SET status='done', final_count=?, temp_count=?, result_path=?,"
+                " finished_at=? WHERE id=? AND attempt=?",
+                (payload["count"], payload["count"], str(target), db.now(), task_id, attempt),
+            )
+            if not updated.rowcount:
+                return
+            self._ensure_v0(conn, task_id, payload)
         # 旧 attempt 的结果文件可重算，不必长期占用磁盘
         for stale in config.RESULT_DIR.glob(f"{task_id}_a*.json"):
             if not stale.name.endswith(f"_a{attempt}.json"):
@@ -165,9 +170,8 @@ class TaskRuntime:
         payload["image"] = merged
         return payload
 
-    def _ensure_v0(self, task_id: str, payload: dict, *, actor: str) -> None:
-        if db.one("SELECT label FROM versions WHERE task_id=? AND label='v0'", (task_id,)):
-            return
+    @staticmethod
+    def _ensure_v0(conn: sqlite3.Connection, task_id: str, payload: dict) -> None:
         detections = payload["detections"]
         counts = {
             "total": len(detections),
@@ -177,7 +181,7 @@ class TaskRuntime:
             "deleted": sum(1 for d in detections if d.get("review_state") == "deleted"),
             "added": 0,
         }
-        db.execute(
+        conn.execute(
             "INSERT OR IGNORE INTO versions(task_id,label,project_id,author,created_at,readonly,"
             "summary,counts,detections) VALUES(?,?,?,?,?,?,?,?,?)",
             (task_id, "v0", payload["image"]["project_id"], "model", db.now(), 1,
