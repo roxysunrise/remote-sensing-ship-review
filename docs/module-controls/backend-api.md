@@ -4,7 +4,8 @@
 
 - Worker 先写推理结果文件，再用同一 SQLite 事务发布任务 `done` 和基线版本 `v0`。写入尚未提交时进程退出，任务仍处于可恢复状态，启动恢复将其标为 `SERVER_RESTART`，可通过现有重试接口重新计算。
 - 复跑：`python -m unittest tests.test_backend.BackendTests.test_worker_exit_during_result_publication_and_retry -v`。测试使用合成影像及预测桩，真实子进程在写 v0 前退出；读取原任务状态、触发单任务恢复、重试并检查影像内容、草稿、v0 以及非项目成员读文件、瓦片、草稿和版本的 403 响应。
-- Windows / CPU 使用项目 `best.pt` 运行 `python -m unittest discover -s tests`，79 项通过。仍需单独验收完整 ASGI 进程停止并启动、多人并发、备份恢复与历史库中已经形成的缺 v0 任务。
+- Windows / CPU 使用项目 `best.pt` 运行 `python -m unittest discover -s tests`，80 项通过。仍需单独验收完整 ASGI 进程停止并启动、多人并发与备份恢复。
+- 启动恢复旧库已完成但缺 v0 的任务时，仅从对应任务和尝试号的本地结果文件还原。影像身份、哈希、尺寸、检测数量和旋转框必须与记录及契约一致。损坏、缺失或无法对应的结果仅记录警告，已有版本不覆盖。回归入口 `tests.test_backend.BackendTests.test_recover_missing_legacy_version_from_verified_result`。
 - 本地隔离工作树验证，待 A 方合入候选基线。公共 API 与依赖沿用现有约定。
 
 

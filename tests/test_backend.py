@@ -476,6 +476,51 @@ with patch.object(worker, "_ensure_v0", side_effect=lambda *args, **kwargs: os._
                 self.assertEqual(denied.status_code, 403, denied.text)
                 self.assertEqual(denied.json()["error"]["code"], "PROJECT_FORBIDDEN")
 
+    def test_recover_missing_legacy_version_from_verified_result(self):
+        from backend import jobs, storage
+
+        uploaded = self._upload(_image_bytes(), "legacy.png")
+        image = db.one("SELECT * FROM images WHERE id=?", (uploaded["image_id"],))
+        worker = jobs.TaskRuntime()
+        payload = worker._attach_image_record({
+            "schema_version": "ship-detection/0.2", "count": 1, "detections": [_fake_detection(1)],
+        }, image)
+        task_ids = {}
+        for case in ("valid", "existing", "missing", "corrupt", "wrong_image", "bad_detection"):
+            task_id = task_ids[case] = db.new_id("tsk")
+            target = storage.result_path(task_id, 1)
+            db.execute(
+                "INSERT INTO tasks(id,project_id,image_id,created_by,status,final_count,parameters,"
+                " result_path,created_at) VALUES(?,?,?,?, 'done', 1, '{}', ?,?)",
+                (task_id, image["project_id"], image["id"], "usr_owner", str(target), db.now()),
+            )
+            if case == "missing":
+                continue
+            if case == "corrupt":
+                target.write_text("{", encoding="utf-8")
+                continue
+            result = json.loads(json.dumps(payload))
+            if case == "wrong_image":
+                result["image"]["sha256"] = "wrong"
+            if case == "bad_detection":
+                result["detections"][0]["polygon"] = [[1, 1]]
+            target.write_text(json.dumps(result), encoding="utf-8")
+            if case == "existing":
+                self._seed_v0(task_id, [_fake_detection(2)])
+
+        with self.assertLogs("backend.jobs", level="WARNING") as warnings:
+            worker._recover_missing_versions()
+            worker._recover_missing_versions()
+        self.assertEqual(len(warnings.output), 8)
+        for case, task_id in task_ids.items():
+            with self.subTest(case=case):
+                row = db.one("SELECT detections FROM versions WHERE task_id=? AND label='v0'", (task_id,))
+                if case in {"valid", "existing"}:
+                    expected = 1 if case == "valid" else 2
+                    self.assertEqual([det["id"] for det in json.loads(row["detections"])], [expected])
+                else:
+                    self.assertIsNone(row)
+
     # --- /vision/* --------------------------------------------------------
     def test_vision_capabilities(self):
         body = self.client.get("/vision/capabilities").json()
