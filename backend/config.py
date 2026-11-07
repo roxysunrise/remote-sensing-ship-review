@@ -16,7 +16,11 @@ TMP_DIR = VAR / "tmp"
 TILE_DIR = VAR / "tiles"
 DB_PATH = Path(os.environ.get("SHIP_DB_PATH") or (VAR / "ship.db")).resolve()
 
-WEIGHTS = Path(os.environ.get("SHIP_WEIGHTS") or (ROOT / "models/yolov8l-obb-dota-v1-80e/best.pt")).resolve()
+def _default_weights() -> Path:
+    """Use the project-trained DOTA-v1 YOLOv8l-OBB weights."""
+    return ROOT / "models/yolov8l-obb-dota-v1-80e/best.pt"
+
+WEIGHTS = Path(os.environ.get("SHIP_WEIGHTS") or _default_weights()).resolve()
 DEVICE = os.environ.get("SHIP_DEVICE", "cpu")
 
 CHUNK_SIZE = int(os.environ.get("SHIP_CHUNK_SIZE", 1 << 20))

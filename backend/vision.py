@@ -11,7 +11,9 @@ from __future__ import annotations
 
 import math
 import secrets
+import tempfile
 import time
+from pathlib import Path
 
 from fastapi import APIRouter, Body
 from PIL import Image
@@ -69,15 +71,31 @@ def detect(payload: dict = Body(default_factory=dict)) -> dict:
     image = _request_image(payload)
     started = time.perf_counter()
     try:
+        tiling = bool(options.get("tiling", False))
         params = {
-            "tiling": False,
+            "tiling": tiling,
             "conf": float(options.get("conf", 0.25)),
             "iou": float(options.get("iou", 0.7)),
-            # 不再二次下采样：imgsz 对齐到当前帧的最大边（上限 2048）
-            "imgsz": _align(max(image.width, image.height)),
+            # 切片模式固定 1024；整图模式按当前帧最大边对齐（上限 2048）
+            "imgsz": 1024 if tiling else _align(max(image.width, image.height)),
             "max_det": int(options.get("max_det", 200)),
         }
-        result = detector.service.predict_image(image, params)
+        if tiling:
+            # predict_large 走文件入口；仅图片模式使用，视频帧仍走内存直推。
+            fd, path = tempfile.mkstemp(prefix="vision-tile-", suffix=".png", dir=config.TMP_DIR)
+            try:
+                import os
+                os.close(fd)
+                image.save(path, format="PNG")
+                params.update(tile_size=1024, stride=512, merge_iou=0.1)
+                result = detector.service.predict(Path(path), params)
+            finally:
+                try:
+                    Path(path).unlink(missing_ok=True)
+                except OSError:
+                    pass
+        else:
+            result = detector.service.predict_image(image, params)
     finally:
         image.close()
 

@@ -1,13 +1,14 @@
-# 已训练 YOLOv8l-OBB 权重
+# DOTA-v1.0 YOLOv8l-OBB 自训练权重（80 epochs）
 
-下载并校验日期：2026-10-27（Asia/Shanghai）。
+本目录的 `best.pt` 是项目自训练权重，已实际加载到后端并完成 14 张用户影像推理。
 
-- 文件：`best.pt`，89,393,063 字节。
-- 来源服务器：`connect.westc.seetacloud.com:49002`。
-- 来源路径：`/root/autodl-tmp/runs/obb/dota_v1_yolov8l_80e/weights/best.pt`。
-- SHA256：`6508d583f538e858d498335c0fb6efd24c9e5116823eb4152f6d6979193cd26f`。
-- 服务器与本地 SHA256 一致。
-- 当前读取的训练 args.yaml：task=obb，初始模型 yolov8l-obb.pt，DOTA-v1-YOLO-OBB/data.yaml，epochs=80，imgsz=1024，batch=4，seed=0。results.csv 有第80轮记录。
-- 同目录存在 last.pt，本次下载用于推理的 best.pt。
+- 来源：GitHub Release `dota-v1-yolov8l-80e-weights`
+  <https://github.com/roxysunrise/remote-sensing-ship-review/releases/tag/dota-v1-yolov8l-80e-weights>
+- 文件：`best.pt`，89,393,063 bytes
+- SHA256：`6508d583f538e858d498335c0fb6efd24c9e5116823eb4152f6d6979193cd26f`
+- 训练：DOTA-v1.0，YOLOv8l-OBB，80 epochs，batch 4，imgsz 1024
+- 验证：mAP50 0.6221，mAP50-95 0.4044（Release 记录；未独立复评）
+- 任务：`obb`；类别含 `ship`（索引 1），共 15 类
+- 权重文件不进入 Git；新机器从 Release 下载到本路径，或用 `SHIP_WEIGHTS` 指向。
 
-校验仅证明下载文件与远端一致；尚未在本地加载权重或执行推理，最佳轮次、依赖兼容性和实际检测效果尚未核查。认证信息未写入文件。
+上一轮临时使用的公开 `models/yolov8l-obb-public/best.pt` 已删除；后端默认只读取本目录权重。

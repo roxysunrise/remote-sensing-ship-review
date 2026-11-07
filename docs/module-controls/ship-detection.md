@@ -1,5 +1,31 @@
 # 船舶检测控制文档
 
+
+## 当前增量：检测页真实接入与用户影像验证（2026-11-05）
+
+- 模块ID不变：ship-detection，A负责；本轮只做应用接入与运行验证，不改训练、阈值或检测几何。
+- 工作区：当前 `github-repo` 工作树（基于 `codex/frontend-login`）；从 `codex/app-backend` 带入
+  `algorithm/`、`backend/`、`contracts/`、`scripts/`、`tests/`，前端检测页使用 `frontend/detect-config.js`
+  的 `mode: 'http'` 指向 `http://127.0.0.1:8000/api/v1`。
+- 入口：`backend.server` → `backend.detector` → `algorithm.ship_detector`；`/vision/capabilities`、
+  `/vision/detect`、`/vision/segment` 已由前端真实调用。`/vision/*` 当前无鉴权，仅本机绑定。
+- 权重：使用自训练 `models/yolov8l-obb-dota-v1-80e/best.pt`（DOTA-v1.0，80 epochs，89,393,063 bytes，
+  SHA256 `6508d583...cd26f`），来自项目 Release `dota-v1-yolov8l-80e-weights`；`backend/config.py`
+  只指向该权重，公开临时权重目录已删除。
+- 验证：14 张桌面影像完成真实推理；逐图 `result.json`/`preview.png` 与汇总位于
+  `outputs/user-2026-11-05/`（Git忽略），报告 `report.html`。直接 tiled 模式（1024/512/0.1）
+  合计 81 框：95F4… 69、P0331 5、P0336 5、P0353 2（车辆/设备，疑似误检），其余 0；
+  前端的 `/vision/detect` 切片模式为 95F4 67 / P0331 4 / P0336 5 / P0353 1，差异来自“发送 1600 长边、4 片而非原图 16 片”。
+- 已实际运行：`/health` 返回 `model_ready:true`；真实 UI 批次导入 14 张并完成检测；
+  `/vision/detect` 已支持 `options.tiling`，图片按 1024/512/0.1 切片，视频帧仍走内存直推；
+  启动时遇到的 Python 3.9 `str | None` 注解错误通过 `eval_type_backport==0.4.0` 解决。
+  GPU 设备 RTX 5070 Laptop；`/vision/capabilities` 返回 `OBBModel`。未做精度评估。
+- Git状态：本轮改动落在本地分支 `codex/detection-integration`，本地提交（见 `git log`）；**未推送**；`outputs/`、`models/` 权重、`var/` 均不入库。
+- 限制：自训练权重对远景小船仍有漏检，工业区出现 2 个误检；前端 `/vision` 不做原图切片，
+  不能把 UI 计数当作切片结果。权重许可证（Ultralytics AGPL/商业）和用户影像版权需发布前确认。
+- 下一步：用自训练权重替换并复跑；补 `/vision/detect` 的原图切片选项；在独立标注集上评估
+  AP/召回，不要用本批少量影像宣称泛化精度。
+
 ## 当前增量：大图推理增强（2026-10-29）
 
 - 同一模块ID ship-detection，A负责；新增predict_large/CLI --tiled，复用原模型，不建立另一个业务模块。

@@ -115,7 +115,7 @@ class DetectorService:
             "modes": ["image"],
             "tasks": ["detect", "segment"],
             "models": {
-                "detect": {k: model[k] for k in ("name", "version", "device")},
+                "detect": {k: model[k] for k in ("name", "version", "device", "weights", "weights_sha256")},
                 "segment": {"name": "roi-oriented-proposal", "version": "0.1"},
             },
             "limits": {"max_image_edge": config.VISION_MAX_EDGE,

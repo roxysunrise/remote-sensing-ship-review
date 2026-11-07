@@ -4,3 +4,6 @@ uvicorn==0.34.0
 pydantic==2.10.4
 # 仅测试用（fastapi.testclient 依赖 httpx）
 httpx==0.28.1
+
+# Python 3.9 compatibility for FastAPI annotations such as `str | None`
+eval_type_backport==0.4.0
