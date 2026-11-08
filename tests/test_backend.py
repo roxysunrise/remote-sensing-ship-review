@@ -260,7 +260,6 @@ class BackendTests(unittest.TestCase):
         self._wait_idle()
         state = self._upload(_image_bytes((96, 72)), "bad-params.png")
         cases = [
-            ({"classes": []}, "classes 空数组"),
             ({"classes": ["1"]}, "classes 非整数"),
             ({"conf": 2.0}, "conf 超出 (0,1]"),
             ({"iou": 0}, "iou 为 0"),
@@ -274,6 +273,15 @@ class BackendTests(unittest.TestCase):
                 }, headers=self.headers)
                 self.assertEqual(response.status_code, 422, f"{label}: {response.text[:200]}")
                 self.assertEqual(response.json()["error"]["code"], "INVALID_ARGUMENT")
+
+        # 空数组等同全部类别（与 /vision/detect 一致），不再视为错误
+        empty = self.client.post("/projects/harbor-a/tasks", json={
+            "image_id": state["image_id"], "parameters": {"classes": []},
+        }, headers=self.headers)
+        self.assertEqual(empty.status_code, 201, empty.text)
+        self.assertIsNone(empty.json()["parameters"]["classes"], "空数组应归一化为 null")
+        self.client.post(f"/tasks/{empty.json()['id']}/cancel", headers=self.headers)
+        self._wait_idle()
 
         # 合法参数仍然可以创建，且不会被上面的错误影响
         ok = self.client.post("/projects/harbor-a/tasks", json={

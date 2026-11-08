@@ -76,23 +76,26 @@
 > 修复过程本身有个教训：插入函数时误放在 `@router.post(...)` 与 `create_task` 之间，
 > 装饰器绑到了新函数上，导致创建任务返回 `201 null`。已调整定义顺序并加测试守住。
 
-### P1-2 `classes` 空数组语义，两份契约互相矛盾（待双方定）
+### P1-2 `classes` 空数组语义，两份契约原本互相矛盾（已统一）
 
-| 契约 | 写法 |
+| 契约（原状） | 写法 |
 |---|---|
 | `frontend/api/openapi.yaml`（业务） | "省略或 null 使用全部模型类别，**空数组无效**" |
 | `frontend/api/detect-openapi.yaml`（推理） | "省略、null 或**空数组**使用全部模型类别" |
 
-实测行为：
+**统一为"空数组等同 null（全部类别）"**，理由：推理端点早已这样实现，前端也按此调用；
+改业务端点比改推理端点风险低。落地三处：
+
+- `backend/api.py`：`create_task` 把空 `classes` 归一化为 `None` 再校验；
+- `frontend/api/openapi.yaml`：`DetectionParameters.classes` 描述改为"省略、null 或空数组都表示全部类别"；
+- `tests/test_backend.py`：空数组断言从"422"改为"201 且 `parameters.classes is null`"。
+
+统一后的行为：
 
 | 入口 | `classes=[]` | `classes=null` | `classes=[1]` | `classes=[99]` |
 |---|---|---|---|---|
 | `POST /vision/detect` | 全部 15 类 | 全部 15 类 | 只 `ship` | 422 |
-| `POST /projects/{id}/tasks` | **422**（本轮修复后） | 全部类别 | 只 `ship` | 任务仍会失败（见 P3-1） |
-
-同一个参数名两种语义，调用方要写两套判断。建议统一为**空数组等同 null（全部类别）**，
-因为推理端点已经这么做，且"什么都不筛"比"报错"更符合直觉；若要保留严格语义，
-则两份契约必须写成同一句话。
+| `POST /projects/{id}/tasks` | 全部类别（归一化） | 全部类别 | 只 `ship` | 任务阶段报错（见 P3-1） |
 
 ### P2-1 契约缺 10 条路径
 

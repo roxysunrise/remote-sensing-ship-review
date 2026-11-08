@@ -536,6 +536,10 @@ def create_task(project_id: str, body: dict = Body(...), state: dict = State) ->
 
     parameters = dict(config.DEFAULT_PARAMETERS)
     parameters.update({k: v for k, v in (body.get("parameters") or {}).items() if v is not None})
+    # 类别过滤：空数组等同 null（全部类别），与 /vision/detect 的语义保持一致。
+    # 2026-11-08 审计发现两份契约对空数组的写法相反，这里统一取"全部类别"。
+    if isinstance(parameters.get("classes"), (list, tuple, set)) and not parameters["classes"]:
+        parameters["classes"] = None
     # 参数在创建时就校验：非法值应当场 422，而不是先入队、占了并发额度，
     # 再让 Worker 里抛错把任务标成 failed（2026-11-08 审计发现）。
     _validate_task_parameters(parameters)

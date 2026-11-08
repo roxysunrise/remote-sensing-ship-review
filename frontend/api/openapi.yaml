@@ -662,6 +662,208 @@ paths:
                   id: { type: string }
                   status: { type: string, enum: [cancelled] }
 
+  /projects/{project_id}/images:
+    get:
+      tags: [images]
+      summary: 项目影像列表（按创建时间倒序）
+      description: 工作台刷新或重新进入后据此恢复已有影像；items[] 与 GET /images/{image_id} 同构。
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+      responses:
+        '200':
+          description: 影像列表
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ImageList' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /files/{image_id}:
+    get:
+      tags: [images]
+      summary: 原始影像下载（鉴权 + ETag）
+      description: 返回上传时的原始字节。支持 If-None-Match，命中返回 304。
+      parameters:
+        - $ref: '#/components/parameters/ImageId'
+        - name: If-None-Match
+          in: header
+          required: false
+          schema: { type: string }
+      responses:
+        '200':
+          description: 原始影像
+          headers:
+            ETag: { schema: { type: string } }
+            Cache-Control: { schema: { type: string } }
+          content:
+            image/png: { schema: { type: string, format: binary } }
+            image/jpeg: { schema: { type: string, format: binary } }
+        '304': { description: 未修改（ETag 命中） }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /previews/{image_id}:
+    get:
+      tags: [images]
+      summary: 预览图（JPEG，最长边 2048）
+      description: 与 GET /files/{image_id} 同样的鉴权与条件请求语义。
+      parameters:
+        - $ref: '#/components/parameters/ImageId'
+        - name: If-None-Match
+          in: header
+          required: false
+          schema: { type: string }
+      responses:
+        '200':
+          description: 预览图
+          content:
+            image/jpeg: { schema: { type: string, format: binary } }
+        '304': { description: 未修改（ETag 命中） }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /exports/{export_id}/files/{name}:
+    get:
+      tags: [exports]
+      summary: 下载导出文件
+      parameters:
+        - $ref: '#/components/parameters/ExportId'
+        - name: name
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: 导出文件（CSV / JSON / PNG）
+          headers:
+            Content-Disposition: { schema: { type: string } }
+          content:
+            text/csv: { schema: { type: string, format: binary } }
+            application/json: { schema: { type: string, format: binary } }
+            image/png: { schema: { type: string, format: binary } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /projects/{project_id}/stats:
+    get:
+      tags: [stats]
+      summary: 项目运行统计
+      description: 只聚合业务库真实记录。detections_total 是模型候选数而非确认数；completion_rate 只反映复核动作。
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+        - name: from
+          in: query
+          required: false
+          schema: { type: string, format: date-time }
+        - name: to
+          in: query
+          required: false
+          schema: { type: string, format: date-time }
+      responses:
+        '200':
+          description: 项目统计
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProjectStats' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { description: 时间范围格式不合法 }
+
+  /tasks/{task_id}/stats:
+    get:
+      tags: [stats]
+      summary: 单任务统计
+      description: 没有结果文件时 timing.* 如实返回 null，不估算。
+      parameters:
+        - $ref: '#/components/parameters/TaskId'
+      responses:
+        '200':
+          description: 任务统计
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TaskStats' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /ai/planner:
+    get:
+      tags: [ai]
+      summary: VLM 规划器状态
+      description: 默认关闭（provider=none）。关闭或超预算时 AI 补框自动降级为纯几何通道，不影响可用性。
+      responses:
+        '200':
+          description: 规划器状态
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PlannerStatus' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /images/{image_id}/tile-plan:
+    post:
+      tags: [tiles]
+      summary: 切片预演（只算网格，不跑模型）
+      parameters:
+        - $ref: '#/components/parameters/ImageId'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                tile_size: { type: integer, example: 1024 }
+                stride: { type: integer, example: 512 }
+      responses:
+        '200':
+          description: 切片计划
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TilePlan' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /images/{image_id}/tile-manifest:
+    get:
+      tags: [tiles]
+      summary: 大图金字塔层级清单
+      parameters:
+        - $ref: '#/components/parameters/ImageId'
+      responses:
+        '200':
+          description: 层级清单
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TileManifest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /tiles/{image_id}/{z}/{x}/{y}:
+    get:
+      tags: [tiles]
+      summary: 按需生成并缓存瓦片（JPEG，带 ETag）
+      parameters:
+        - $ref: '#/components/parameters/ImageId'
+        - name: z
+          in: path
+          required: true
+          schema: { type: integer, minimum: 0 }
+        - name: x
+          in: path
+          required: true
+          schema: { type: integer, minimum: 0 }
+        - name: y
+          in: path
+          required: true
+          schema: { type: integer, minimum: 0 }
+      responses:
+        '200':
+          description: 瓦片
+          content:
+            image/jpeg: { schema: { type: string, format: binary } }
+        '304': { description: 未修改（ETag 命中） }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { description: 越界或影像不存在 }
+
 components:
   securitySchemes:
     bearerAuth:
@@ -690,6 +892,12 @@ components:
       required: true
       schema: { type: string }
 
+    ExportId:
+      name: export_id
+      in: path
+      required: true
+      schema: { type: string }
+      description: 导出任务 ID
   responses:
     Error:
       description: 统一错误信封
@@ -814,7 +1022,7 @@ components:
           nullable: true
           minItems: 1
           items: { type: integer, minimum: 0 }
-          description: 省略或 null 使用全部模型类别，空数组无效。项目工作台当前显式传 [1]，对当前 DOTA 权重表示只检测船舶。
+          description: 省略、null 或空数组都表示全部模型类别。项目工作台当前显式传 [1]，对当前 DOTA 权重表示只检测船舶；传空数组与省略等价（与 /vision/detect 一致）。
           example: [1]
         classes_filtered: { type: boolean, readOnly: true, description: 结果是否显式按类别过滤 }
         tiling: { type: boolean, example: true }
@@ -1022,3 +1230,125 @@ components:
               url: { type: string, nullable: true, description: 短期签名链接 }
               bytes: { type: integer }
               error: { type: string, nullable: true }
+
+    ImageList:
+      type: object
+      required: [project_id, total, items]
+      properties:
+        project_id: { type: string }
+        total: { type: integer }
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/Image' }
+
+    ProjectStats:
+      type: object
+      additionalProperties: true
+      required: [range, images, tasks]
+      properties:
+        range:
+          type: object
+          properties:
+            from: { type: string }
+            to: { type: string }
+        images: { type: object, additionalProperties: true }
+        uploads: { type: object, additionalProperties: true }
+        tasks: { type: object, additionalProperties: true }
+        review: { type: object, additionalProperties: true }
+        versions: { type: object, additionalProperties: true }
+        ai: { type: object, additionalProperties: true }
+        regions: { type: object, additionalProperties: true }
+
+    TaskStats:
+      type: object
+      additionalProperties: true
+      required: [task, progress]
+      properties:
+        task: { type: object, additionalProperties: true }
+        progress: { type: object, additionalProperties: true }
+        timing:
+          type: object
+          nullable: true
+          additionalProperties: true
+          description: 没有结果文件时为 null
+        detections: { type: object, additionalProperties: true }
+        review: { type: object, additionalProperties: true }
+        versions: { type: object, additionalProperties: true }
+        ai: { type: object, additionalProperties: true }
+        warnings:
+          type: array
+          items: { type: string }
+
+    PlannerStatus:
+      type: object
+      required: [enabled, provider, model, daily_limit, used_today, remaining, budget_exhausted]
+      properties:
+        enabled: { type: boolean }
+        provider: { type: string, enum: [none, openai] }
+        model: { type: string }
+        endpoint: { type: string }
+        timeout_s: { type: number }
+        retries: { type: integer }
+        max_tokens: { type: integer }
+        daily_limit: { type: integer }
+        used_today: { type: integer }
+        remaining: { type: integer }
+        budget_exhausted: { type: boolean }
+        note: { type: string }
+
+    TilePlan:
+      type: object
+      required: [image_id, tile_count, tiles]
+      properties:
+        image_id: { type: string }
+        image:
+          type: object
+          properties:
+            width: { type: integer }
+            height: { type: integer }
+        parameters:
+          type: object
+          properties:
+            tile_size: { type: integer }
+            stride: { type: integer }
+        tile_count: { type: integer }
+        tiles:
+          type: array
+          items:
+            type: object
+            properties:
+              id: { type: integer }
+              x: { type: integer }
+              y: { type: integer }
+              width: { type: integer }
+              height: { type: integer }
+        coverage:
+          type: object
+          nullable: true
+          properties:
+            covered_px: { type: integer }
+            image_px: { type: integer }
+            overlap_ratio: { type: number }
+            step: { type: integer }
+        note: { type: string, nullable: true }
+
+    TileManifest:
+      type: object
+      required: [image_id, width, height, tile_edge, max_z, levels]
+      properties:
+        image_id: { type: string }
+        width: { type: integer }
+        height: { type: integer }
+        tile_edge: { type: integer }
+        max_z: { type: integer }
+        levels:
+          type: array
+          items:
+            type: object
+            properties:
+              z: { type: integer }
+              cols: { type: integer }
+              rows: { type: integer }
+              width: { type: integer }
+              height: { type: integer }
+        url_template: { type: string }
