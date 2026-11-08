@@ -33,7 +33,7 @@
 ```json
 {
   "project_id": "harbor-a",
-  "total": 2,
+  "total": 1,
   "items": [
     {
       "id": "img_242b62fa311b",
@@ -63,7 +63,7 @@
 |---|---|
 | 鉴权 | 同上 |
 | 路径参数 | `project_id` |
-| 查询参数 | `status`（可选，精确匹配任务状态）<br>`image_id`（可选，只看某幅影像的任务）<br>`limit`（可选，默认 50，范围 1–200） |
+| 查询参数 | `status`（可选，精确匹配任务状态）<br>`image_id`（可选，只看某幅影像的任务）<br>`limit`（可选，默认 50；非零整数限制到 1–200，0 采用默认值） |
 | 成员校验失败 | `403 PROJECT_FORBIDDEN` |
 
 响应 `200`：
@@ -95,7 +95,7 @@
 }
 ```
 
-`items[]` 与 `GET /tasks/{task_id}` 相同，只多一个 `image` 摘要对象（避免前端为每条任务再发一次请求）。
+`total` 是当前筛选和 limit 下实际返回的条数。`items[]` 与 `GET /tasks/{task_id}` 相同，只多一个 `image` 摘要对象（避免前端为每条任务再发一次请求）。
 
 ## 4. 兼容性
 
@@ -115,5 +115,5 @@ A 侧参考实现已在 `codex/frontend-http-wiring` 分支给出（可与本文
 ## 6. 实现位置
 
 - `backend/api.py`：`list_images`、`list_tasks`
-- `backend/tests/test_backend.py`：`test_project_images_list`、`test_project_tasks_list`
+- `tests/test_backend.py`：`test_project_images_list`、`test_project_tasks_list`
 - 实测：`GET /projects/harbor-a/images` → `total=6`；`GET /projects/harbor-a/tasks` → `total=6`（带 `image.file_name`）
