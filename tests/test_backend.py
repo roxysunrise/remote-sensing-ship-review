@@ -255,6 +255,114 @@ class BackendTests(unittest.TestCase):
                                  headers={"Authorization": f"Bearer {login['token']}"})
         self.assertEqual(denied.status_code, 403)
 
+    # --- 账号与成员（受控开户） ------------------------------------------
+    def test_admin_creates_user_and_member(self):
+        name = f"u{uuid.uuid4().hex[:8]}"
+        created = self.client.post("/users", json={
+            "username": name, "password": "pass-12345", "name": "新分析员",
+            "project_id": "harbor-a", "role": config.USER_ROLE_ANALYST,
+        }, headers=self.headers)
+        self.assertEqual(created.status_code, 201, created.text)
+        body = created.json()
+        self.assertEqual(body["username"], name)
+        self.assertEqual(body["projects"][0]["id"], "harbor-a")
+        self.assertFalse(body["is_admin"])
+
+        login = self.client.post("/auth/login", json={
+            "username": name, "password": "pass-12345", "project_id": "harbor-a"})
+        self.assertEqual(login.status_code, 200, login.text)
+        self.assertFalse(login.json()["user"]["is_admin"])
+
+        listed = self.client.get("/users", headers=self.headers).json()
+        self.assertTrue(any(item["username"] == name for item in listed["items"]))
+
+    def test_create_user_validation(self):
+        cases = [
+            ({"username": "ab", "password": "pass-12345"}, "用户名过短"),
+            ({"username": "bad name", "password": "pass-12345"}, "用户名含空格"),
+            ({"username": "ok" + uuid.uuid4().hex[:6], "password": "short"}, "密码过短"),
+            ({"username": "roxysunrise", "password": "pass-12345"}, "用户名重复"),
+        ]
+        for payload, label in cases:
+            with self.subTest(label=label):
+                response = self.client.post("/users", json=payload, headers=self.headers)
+                self.assertIn(response.status_code, (409, 422), f"{label}: {response.text[:160]}")
+
+    def test_non_admin_cannot_manage_users(self):
+        login = self.client.post("/auth/login", json={
+            "username": "analyst", "password": PASSWORD, "project_id": "harbor-a"}).json()
+        headers = {"Authorization": f"Bearer {login['token']}"}
+        self.assertEqual(self.client.get("/users", headers=headers).status_code, 403)
+        denied = self.client.post("/users", json={
+            "username": "x" + uuid.uuid4().hex[:6], "password": "pass-12345"}, headers=headers)
+        self.assertEqual(denied.status_code, 403)
+        self.assertEqual(denied.json()["error"]["code"], "FORBIDDEN")
+
+    def test_password_change_revokes_other_sessions(self):
+        name = f"u{uuid.uuid4().hex[:8]}"
+        created = self.client.post("/users", json={
+            "username": name, "password": "pass-12345", "project_id": "harbor-a"},
+            headers=self.headers).json()
+        login = self.client.post("/auth/login", json={
+            "username": name, "password": "pass-12345", "project_id": "harbor-a"}).json()
+        headers = {"Authorization": f"Bearer {login['token']}"}
+        self.assertEqual(self.client.get("/me", headers=headers).status_code, 200)
+
+        patched = self.client.patch(f"/users/{created['id']}",
+                                    json={"password": "new-pass-678"}, headers=self.headers)
+        self.assertEqual(patched.status_code, 200, patched.text)
+        self.assertGreaterEqual(patched.json()["revoked_sessions"], 1)
+        self.assertEqual(self.client.get("/me", headers=headers).status_code, 401)
+        relogin = self.client.post("/auth/login", json={
+            "username": name, "password": "new-pass-678", "project_id": "harbor-a"})
+        self.assertEqual(relogin.status_code, 200)
+
+    def test_disable_user_blocks_login_and_self_lockout(self):
+        name = f"u{uuid.uuid4().hex[:8]}"
+        created = self.client.post("/users", json={
+            "username": name, "password": "pass-12345", "project_id": "harbor-a"},
+            headers=self.headers).json()
+        disabled = self.client.patch(f"/users/{created['id']}", json={"status": "disabled"},
+                                     headers=self.headers)
+        self.assertEqual(disabled.status_code, 200, disabled.text)
+        denied = self.client.post("/auth/login", json={
+            "username": name, "password": "pass-12345", "project_id": "harbor-a"})
+        self.assertEqual(denied.status_code, 401)
+
+        me = self.client.get("/me", headers=self.headers).json()
+        self.assertTrue(me["is_admin"])
+        self.assertEqual(self.client.patch(f"/users/{me['id']}", json={"status": "disabled"},
+                                          headers=self.headers).status_code, 409)
+        self.assertEqual(self.client.patch(f"/users/{me['id']}", json={"is_admin": False},
+                                          headers=self.headers).status_code, 409)
+
+    def test_member_add_and_remove(self):
+        name = f"u{uuid.uuid4().hex[:8]}"
+        created = self.client.post("/users", json={
+            "username": name, "password": "pass-12345"}, headers=self.headers).json()
+        added = self.client.post("/projects/harbor-b/members",
+                                 json={"user_id": created["id"], "role": config.USER_ROLE_ANALYST},
+                                 headers=self.headers)
+        self.assertEqual(added.status_code, 201, added.text)
+        again = self.client.post("/projects/harbor-b/members",
+                                 json={"user_id": created["id"]}, headers=self.headers)
+        self.assertEqual(again.status_code, 409)
+        self.assertEqual(again.json()["error"]["code"], "ALREADY_MEMBER")
+        project = self.client.get("/projects/harbor-b", headers=self.headers).json()
+        self.assertTrue(any(m["id"] == created["id"] for m in project["members"]))
+
+        removed = self.client.delete(f"/projects/harbor-b/members/{created['id']}",
+                                     headers=self.headers)
+        self.assertEqual(removed.status_code, 204)
+
+    def test_cannot_remove_last_owner(self):
+        project = self.client.get("/projects/harbor-a", headers=self.headers).json()
+        owner = next(m for m in project["members"] if m["role"] == config.USER_ROLE_OWNER)
+        response = self.client.delete(f"/projects/harbor-a/members/{owner['id']}",
+                                      headers=self.headers)
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.json()["error"]["code"], "LAST_OWNER")
+
     def test_create_task_rejects_invalid_parameters(self):
         """非法检测参数在创建时就 422，不能先入队再让 Worker 把任务跑成 failed。"""
         self._wait_idle()
