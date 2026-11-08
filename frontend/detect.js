@@ -80,6 +80,14 @@
     cacheEls();
     initCanvas();
     initApiMode();
+
+    // 真实推理模式必须有会话：此前本页没引入 auth-session.js，
+    // 未勾选「保持登录」的用户 token 只在 sessionStorage 里，本页读不到，
+    // 表现为"进标注页像是掉登录"。现在统一按会话判定并带回跳地址。
+    if (window.AuthSession && window.DetectAPI && window.DetectAPI.mode === 'http') {
+      if (!AuthSession.requireAuth()) return;
+    }
+
     bindMedia();
     bindTools();
     bindStage();
