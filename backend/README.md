@@ -6,7 +6,7 @@
 
 - 技术栈：Python 3.10 / FastAPI / SQLite（WAL）/ 本地私有文件目录
 - 契约来源：`frontend/api/openapi.yaml`、`frontend/api/detect-openapi.yaml`、`contracts/ship-detection-v0.2.md`
-- 当前状态：**已接入（部分）**（2026-11-05 真实权重 + 真实 HTTP + 真实浏览器联调通过；未合入 main，未部署）
+- 当前状态：**已接入**（2026-11-05 真实权重 + 真实 HTTP + 真实浏览器联调通过；2026-11-08 已合入 main，未部署）
 
 ## 1. 启动
 
