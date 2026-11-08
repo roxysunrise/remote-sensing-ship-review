@@ -33,7 +33,8 @@
 - 状态：**已接入（部分）**。2026-11-05 完成真实权重 + 真实 HTTP + 真实浏览器联调：登录、工作台渲染、
   上传、检测、复核、版本、区域、导出、`/vision/*` 全链路通过。仍有两处 B 侧未接：
   工作台影像卡片仍用内置演示影像（新端点 `GET /projects/{id}/images` 已就绪待接）、
-  `index.html` 的"演示数据"徽章硬编码。未合入 main、未部署、未做应用验收。
+  `index.html` 的"演示数据"徽章硬编码（已在前端接线中改为按 `API.mode` 显示）。
+  2026-11-08 已通过 PR #16 合入 main；未部署、未做应用验收。
 - Git：分支 `codex/app-backend`（实现提交 `148be2e`，远端已核对一致），基线 `codex/ship-tiled-inference`（685eddc）。
 - Issue：[#7](https://github.com/roxysunrise/remote-sensing-ship-review/issues/7)；
   PR：[#8](https://github.com/roxysunrise/remote-sensing-ship-review/pull/8)（base `codex/ship-tiled-inference`，mergeable clean）。

@@ -5,7 +5,7 @@
 当前状态：后端 `backend/`（业务 40 个端点 + 5 个推理端点）、算法 `algorithm/`
 （YOLOv8l-OBB 单图与大图切片）、前端 `frontend/`（登录页、工作台、检测页）均已就位，
 可用一条命令在本机跑通「登录 → 上传 → 检测 → 复核 → 统计 → 导出」。
-**未合入 main、未部署**；项目训练权重不入库，需自行放置。
+**已合入 main**（合并提交 `3c3a31c`，PR #16），未部署；项目训练权重不入库，需自行放置。
 
 一键启动、账号与自检见[快速开始](docs/quickstart.md)：`scripts/start-dev.ps1`。
 A/B 交付版本、权重校验与复跑步骤见[联合验收候选基线](docs/validation/ab-acceptance-baseline.md)。
