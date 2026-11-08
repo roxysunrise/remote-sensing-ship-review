@@ -12,12 +12,14 @@ import hashlib
 import io
 import json
 import os
+import subprocess
 import sys
 import tempfile
 import time
 import unittest
 import uuid
 from pathlib import Path
+from unittest.mock import Mock, patch
 
 ROOT = Path(__file__).resolve().parents[1]
 # 两个测试模块共享同一套环境变量：谁先导入 backend 谁绑定配置，
@@ -139,8 +141,9 @@ class BackendTests(unittest.TestCase):
         self.assertEqual(denied.status_code, 403)
 
     # --- 上传 -------------------------------------------------------------
-    def _upload(self, data: bytes, name: str = "sample.png", *, expect_ready=True) -> dict:
-        created = self.client.post("/projects/harbor-a/uploads",
+    def _upload(self, data: bytes, name: str = "sample.png", *, expect_ready=True,
+                project_id="harbor-a") -> dict:
+        created = self.client.post(f"/projects/{project_id}/uploads",
                                    json={"file_name": name, "size": len(data)},
                                    headers=self.headers)
         self.assertEqual(created.status_code, 201, created.text)
@@ -251,6 +254,37 @@ class BackendTests(unittest.TestCase):
         denied = self.client.get("/projects/harbor-b/tasks",
                                  headers={"Authorization": f"Bearer {login['token']}"})
         self.assertEqual(denied.status_code, 403)
+
+    def test_create_task_rejects_invalid_parameters(self):
+        """非法检测参数在创建时就 422，不能先入队再让 Worker 把任务跑成 failed。"""
+        self._wait_idle()
+        state = self._upload(_image_bytes((96, 72)), "bad-params.png")
+        cases = [
+            ({"classes": []}, "classes 空数组"),
+            ({"classes": ["1"]}, "classes 非整数"),
+            ({"conf": 2.0}, "conf 超出 (0,1]"),
+            ({"iou": 0}, "iou 为 0"),
+            ({"imgsz": 100}, "imgsz 不是 32 的倍数"),
+            ({"max_det": 0}, "max_det 为 0"),
+        ]
+        for parameters, label in cases:
+            with self.subTest(label=label):
+                response = self.client.post("/projects/harbor-a/tasks", json={
+                    "image_id": state["image_id"], "parameters": parameters,
+                }, headers=self.headers)
+                self.assertEqual(response.status_code, 422, f"{label}: {response.text[:200]}")
+                self.assertEqual(response.json()["error"]["code"], "INVALID_ARGUMENT")
+
+        # 合法参数仍然可以创建，且不会被上面的错误影响
+        ok = self.client.post("/projects/harbor-a/tasks", json={
+            "image_id": state["image_id"],
+            "parameters": {"tiling": True, "tile_size": 128, "stride": 64, "imgsz": 128,
+                           "conf": 0.3, "classes": [1]},
+        }, headers=self.headers)
+        self.assertEqual(ok.status_code, 201, ok.text)
+        self.assertEqual(ok.json()["parameters"]["classes"], [1])
+        # 收尾：取消掉，别占用并发额度影响后续用例
+        self.client.post(f"/tasks/{ok.json()['id']}/cancel", headers=self.headers)
 
     def _wait_idle(self, timeout: float = 180) -> None:
         """等队列清空，避免上一个用例遗留的任务触发并发上限。"""
@@ -394,6 +428,129 @@ class BackendTests(unittest.TestCase):
             self.assertEqual(retried.status_code, 200, retried.text)
             self.assertEqual(retried.json()["attempt"], 2)
             self.assertFalse(retried.json()["cancel_requested"])
+
+    def test_worker_exit_during_result_publication_and_retry(self):
+        """实进程退出，验证 SQLite 未公布无 v0 的 done，再通过 HTTP 重试。"""
+        from backend import jobs
+
+        data = _image_bytes()
+        state = self._upload(data, "restart.png", project_id="harbor-b")
+        image_id = state["image_id"]
+        # 用独立 Worker 处理此任务，避免常驻线程先消费。
+        with patch.object(jobs.runtime, "submit"):
+            created = self.client.post("/projects/harbor-b/tasks", json={
+                "image_id": image_id, "parameters": {"tiling": False},
+            }, headers=self.headers)
+        self.assertEqual(created.status_code, 201, created.text)
+        task_id = created.json()["id"]
+        crash = """
+import os
+import sys
+from unittest.mock import Mock, patch
+
+from backend.jobs import TaskRuntime
+
+service = Mock()
+service.predict.return_value = {"count": 0, "detections": []}
+worker = TaskRuntime(service=service)
+with patch.object(worker, "_ensure_v0", side_effect=lambda *args, **kwargs: os._exit(23)):
+    worker._run(sys.argv[1])
+"""
+        child = subprocess.run([sys.executable, "-c", crash, task_id], cwd=ROOT,
+                               capture_output=True, timeout=20)
+        self.assertEqual(child.returncode, 23, child.stderr.decode(errors="replace"))
+        interrupted = self.client.get(f"/tasks/{task_id}", headers=self.headers).json()
+        self.assertEqual(interrupted["status"], "running")
+        self.assertIsNone(db.one("SELECT label FROM versions WHERE task_id=?", (task_id,)))
+
+        # 此用例只模拟新 Worker 的恢复；先前测试的任务可能尚在原 Worker 中运行。
+        execute = db.execute
+
+        def recover_this_task(sql, args=()):
+            if "WHERE status IN ('queued','running','merging')" in sql:
+                return execute(sql + " AND id=?", (*args, task_id))
+            return execute(sql, args)
+
+        with patch.object(db, "execute", side_effect=recover_this_task):
+            jobs.TaskRuntime._recover_interrupted()
+        failed = self.client.get(f"/tasks/{task_id}", headers=self.headers).json()
+        self.assertEqual(failed["status"], "failed")
+        self.assertIn("SERVER_RESTART", failed["error"])
+
+        fake_service = Mock()
+        fake_service.predict.return_value = {"count": 1, "detections": [_fake_detection(1)]}
+        worker = jobs.TaskRuntime(service=fake_service)
+        with patch.object(jobs.runtime, "submit", side_effect=worker._run):
+            retried = self.client.post(f"/tasks/{task_id}/retry", headers=self.headers)
+        self.assertEqual(retried.status_code, 200, retried.text)
+        self.assertEqual(retried.json()["attempt"], 2)
+        self.assertEqual(retried.json()["status"], "done")
+        draft = self.client.get(f"/tasks/{task_id}/draft", headers=self.headers).json()
+        self.assertEqual([item["id"] for item in draft["detections"]], [1])
+        version = self.client.get(f"/versions/v0?task_id={task_id}", headers=self.headers)
+        self.assertEqual(version.status_code, 200, version.text)
+        self.assertEqual([item["id"] for item in version.json()["detections"]], [1])
+        image = self.client.get(f"/files/{image_id}", headers=self.headers)
+        self.assertEqual(image.status_code, 200, image.text)
+        self.assertEqual(image.content, data)
+
+        login = self.client.post("/auth/login", json={
+            "username": "analyst", "password": PASSWORD, "project_id": "harbor-a",
+        })
+        self.assertEqual(login.status_code, 200, login.text)
+        unauthorized = {"Authorization": f"Bearer {login.json()['token']}"}
+        for path in (f"/files/{image_id}", f"/images/{image_id}/tile-manifest",
+                     f"/tiles/{image_id}/0/0/0", f"/tasks/{task_id}/draft",
+                     f"/versions/v0?task_id={task_id}"):
+            with self.subTest(path=path):
+                denied = self.client.get(path, headers=unauthorized)
+                self.assertEqual(denied.status_code, 403, denied.text)
+                self.assertEqual(denied.json()["error"]["code"], "PROJECT_FORBIDDEN")
+
+    def test_recover_missing_legacy_version_from_verified_result(self):
+        from backend import jobs, storage
+
+        uploaded = self._upload(_image_bytes(), "legacy.png")
+        image = db.one("SELECT * FROM images WHERE id=?", (uploaded["image_id"],))
+        worker = jobs.TaskRuntime()
+        payload = worker._attach_image_record({
+            "schema_version": "ship-detection/0.2", "count": 1, "detections": [_fake_detection(1)],
+        }, image)
+        task_ids = {}
+        for case in ("valid", "existing", "missing", "corrupt", "wrong_image", "bad_detection"):
+            task_id = task_ids[case] = db.new_id("tsk")
+            target = storage.result_path(task_id, 1)
+            db.execute(
+                "INSERT INTO tasks(id,project_id,image_id,created_by,status,final_count,parameters,"
+                " result_path,created_at) VALUES(?,?,?,?, 'done', 1, '{}', ?,?)",
+                (task_id, image["project_id"], image["id"], "usr_owner", str(target), db.now()),
+            )
+            if case == "missing":
+                continue
+            if case == "corrupt":
+                target.write_text("{", encoding="utf-8")
+                continue
+            result = json.loads(json.dumps(payload))
+            if case == "wrong_image":
+                result["image"]["sha256"] = "wrong"
+            if case == "bad_detection":
+                result["detections"][0]["polygon"] = [[1, 1]] * 4
+            target.write_text(json.dumps(result), encoding="utf-8")
+            if case == "existing":
+                self._seed_v0(task_id, [_fake_detection(2)])
+
+        with self.assertLogs("backend.jobs", level="WARNING") as warnings:
+            worker._recover_missing_versions()
+            worker._recover_missing_versions()
+        self.assertEqual(len(warnings.output), 8)
+        for case, task_id in task_ids.items():
+            with self.subTest(case=case):
+                row = db.one("SELECT detections FROM versions WHERE task_id=? AND label='v0'", (task_id,))
+                if case in {"valid", "existing"}:
+                    expected = 1 if case == "valid" else 2
+                    self.assertEqual([det["id"] for det in json.loads(row["detections"])], [expected])
+                else:
+                    self.assertIsNone(row)
 
     # --- /vision/* --------------------------------------------------------
     def test_vision_capabilities(self):

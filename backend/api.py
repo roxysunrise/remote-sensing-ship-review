@@ -16,6 +16,7 @@ from fastapi import APIRouter, Body, Depends, Header, Query, Request
 from fastapi.responses import FileResponse, Response
 
 from algorithm.errors import DetectionError
+from algorithm.ship_detector import ShipDetector
 
 from . import (ai_assist, ai_planner, config, db, detector, errors, geometry, imaging, security,
                stats, storage, tiles)
@@ -502,6 +503,27 @@ def get_tile(image_id: str, z: int, x: int, y: int, request: Request,
 # 检测任务
 # --------------------------------------------------------------------------
 
+def _validate_task_parameters(parameters: dict) -> None:
+    """创建任务时前置校验检测参数。
+
+    参数非法（例如 `classes: []`）应当在 POST 时返回 422，而不是先入队、
+    占用并发额度，再让 Worker 抛错把任务标成 failed。
+    """
+    defaults = config.DEFAULT_PARAMETERS
+    try:
+        ShipDetector.validate_parameters(
+            conf=parameters.get("conf", defaults["conf"]),
+            iou=parameters.get("iou", defaults["iou"]),
+            imgsz=parameters.get("imgsz", defaults["imgsz"]),
+            max_det=parameters.get("max_det", defaults["max_det"]),
+            classes=parameters.get("classes"),
+        )
+    except DetectionError as exc:
+        raise errors.invalid("INVALID_ARGUMENT", str(exc)) from exc
+    except (TypeError, ValueError) as exc:
+        raise errors.invalid("INVALID_ARGUMENT", f"检测参数类型不合法：{exc}") from exc
+
+
 @router.post("/projects/{project_id}/tasks", status_code=201)
 def create_task(project_id: str, body: dict = Body(...), state: dict = State) -> dict:
     _member(project_id, state)
@@ -514,6 +536,9 @@ def create_task(project_id: str, body: dict = Body(...), state: dict = State) ->
 
     parameters = dict(config.DEFAULT_PARAMETERS)
     parameters.update({k: v for k, v in (body.get("parameters") or {}).items() if v is not None})
+    # 参数在创建时就校验：非法值应当场 422，而不是先入队、占了并发额度，
+    # 再让 Worker 里抛错把任务标成 failed（2026-11-08 审计发现）。
+    _validate_task_parameters(parameters)
 
     active = db.one(
         "SELECT COUNT(*) AS n FROM tasks WHERE project_id=? AND status IN ('queued','running','merging')",

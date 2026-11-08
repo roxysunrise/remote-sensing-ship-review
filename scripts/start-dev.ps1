@@ -65,6 +65,7 @@ Write-Ok "fastapi / uvicorn / torch / ultralytics / Pillow / opencv 都在"
 if (-not $Weights) {
     foreach ($candidate in @($env:SHIP_WEIGHTS,
                             "models\yolov8l-obb-dota-v1-80e\best.pt",
+                            "weights\dota_v1_yolov8l_80e\weights\best.pt",
                             "models\_local\yolov8s-obb.pt")) {
         if ($candidate -and (Test-Path $candidate)) { $Weights = $candidate; break }
     }
@@ -72,7 +73,7 @@ if (-not $Weights) {
 if ($Weights -and (Test-Path $Weights)) {
     $Weights = (Resolve-Path $Weights).Path
     Write-Step "权重: $Weights"
-    if ($Weights -notmatch "yolov8l-obb-dota-v1-80e") {
+    if ($Weights -notmatch "yolov8l-obb-dota-v1-80e|dota_v1_yolov8l_80e") {
         Write-Warn "这不是项目训练权重最佳（models/yolov8l-obb-dota-v1-80e/best.pt），演示链路可用但精度不代表项目结果"
     }
 } else {
