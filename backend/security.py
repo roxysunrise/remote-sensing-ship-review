@@ -70,6 +70,17 @@ def revoke(token: str) -> None:
     db.execute("UPDATE sessions SET revoked=1 WHERE token_hash=?", (_token_hash(token),))
 
 
+def revoke_user_sessions(user_id: str, *, keep_token: str | None = None) -> int:
+    """撤销某用户全部会话。改密、停用、移出项目后调用。
+
+    `keep_token` 用于"管理员改自己的密码"这类场景：保留当前会话，其余全部失效。
+    """
+    if keep_token:
+        return db.execute("UPDATE sessions SET revoked=1 WHERE user_id=? AND token_hash<>?",
+                          (user_id, _token_hash(keep_token)))
+    return db.execute("UPDATE sessions SET revoked=1 WHERE user_id=?", (user_id,))
+
+
 # --- 登录失败限速（进程内，够演示用；生产应放共享存储） -------------------------
 
 _attempts: dict[str, list[float]] = {}

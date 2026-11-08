@@ -9,6 +9,7 @@ import csv
 import io
 import json
 import math
+import re
 import threading
 from pathlib import Path
 
@@ -57,6 +58,7 @@ def _user_payload(user: dict, project_id: str | None) -> dict:
     return {
         "id": user["id"], "name": user["display_name"],
         "role": role["role"] if role else config.USER_ROLE_ANALYST,
+        "is_admin": bool(user.get("is_admin")),
         "project": ({"id": project["id"], "name": project["name"], "code": project["code"]}
                     if project else None),
     }
@@ -206,6 +208,188 @@ def logout(state: dict = State):
 @router.get("/me")
 def me(state: dict = State) -> dict:
     return _user_payload(state["user"], state["project_id"])
+
+
+# --------------------------------------------------------------------------
+# 账号与成员：受控开户（管理员建号），项目负责人管本项目成员
+# --------------------------------------------------------------------------
+
+_USERNAME_RE = re.compile(r"^[A-Za-z0-9._-]{3,32}$")
+_MIN_PASSWORD = 8
+
+
+def _require_admin(state: dict) -> None:
+    if not state["user"].get("is_admin"):
+        # 与项目权限区分开：这是全局账号管理权限，不是项目成员关系
+        raise errors.ApiError(403, "FORBIDDEN", "只有账号管理员可以管理账号")
+
+
+def _account_payload(row) -> dict:
+    projects = db.query(
+        "SELECT m.project_id AS id, p.name AS name, m.role AS role FROM members m"
+        " JOIN projects p ON p.id = m.project_id WHERE m.user_id=? ORDER BY m.project_id",
+        (row["id"],),
+    )
+    return {
+        "id": row["id"], "username": row["username"], "name": row["display_name"],
+        "is_admin": bool(row["is_admin"]), "status": row["status"],
+        "created_at": row["created_at"],
+        "projects": [dict(item) for item in projects],
+    }
+
+
+def _check_credentials(username: str, password: str) -> None:
+    if not _USERNAME_RE.match(username):
+        raise errors.invalid("INVALID_ARGUMENT",
+                             "用户名需 3-32 位，只允许字母、数字、点、下划线与短横线")
+    if len(password) < _MIN_PASSWORD:
+        raise errors.invalid("INVALID_ARGUMENT", f"密码至少 {_MIN_PASSWORD} 位")
+
+
+@router.get("/users")
+def list_users(state: dict = State) -> dict:
+    """账号列表（管理员）。"""
+    _require_admin(state)
+    rows = db.query("SELECT * FROM users ORDER BY created_at, username")
+    items = [_account_payload(row) for row in rows]
+    return {"total": len(items), "items": items}
+
+
+@router.post("/users", status_code=201)
+def create_user(body: dict = Body(...), state: dict = State) -> dict:
+    """受控开户：管理员建号，可一步指定加入的项目与角色。"""
+    _require_admin(state)
+    username = str(body.get("username") or "").strip()
+    password = str(body.get("password") or "")
+    display_name = str(body.get("name") or "").strip() or username
+    is_admin = bool(body.get("is_admin"))
+    _check_credentials(username, password)
+    if db.one("SELECT id FROM users WHERE username=?", (username,)):
+        raise errors.conflict("USERNAME_TAKEN", "用户名已存在")
+
+    project_id = str(body.get("project_id") or "").strip() or None
+    role = str(body.get("role") or config.USER_ROLE_ANALYST)
+    if project_id:
+        if db.one("SELECT id FROM projects WHERE id=?", (project_id,)) is None:
+            raise errors.not_found("PROJECT_NOT_FOUND", "项目不存在")
+        _member(project_id, state, owner_only=True)
+        if role not in (config.USER_ROLE_OWNER, config.USER_ROLE_ANALYST):
+            raise errors.invalid("INVALID_ARGUMENT", "角色只支持项目负责人或项目分析员")
+
+    user_id = db.new_id("usr")
+    with db.tx() as conn:
+        conn.execute(
+            "INSERT INTO users(id,username,password_hash,display_name,is_admin,status,created_at)"
+            " VALUES(?,?,?,?,?,'active',?)",
+            (user_id, username, security.hash_password(password), display_name,
+             1 if is_admin else 0, db.now()),
+        )
+        if project_id:
+            conn.execute("INSERT INTO members(project_id,user_id,role) VALUES(?,?,?)",
+                         (project_id, user_id, role))
+    db.log_event("user.create", project_id=project_id, user_id=state["user"]["id"],
+                 target=user_id,
+                 detail={"username": username, "is_admin": is_admin, "role": role})
+    return _account_payload(db.one("SELECT * FROM users WHERE id=?", (user_id,)))
+
+
+@router.patch("/users/{user_id}")
+def update_user(user_id: str, body: dict = Body(...), state: dict = State) -> dict:
+    """改名 / 改密 / 停用启用 / 调整管理员。改密与停用会撤销该用户的其他会话。"""
+    _require_admin(state)
+    row = db.one("SELECT * FROM users WHERE id=?", (user_id,))
+    if row is None:
+        raise errors.not_found("USER_NOT_FOUND", "账号不存在")
+    me = state["user"]["id"]
+
+    fields: list[str] = []
+    params: list = []
+    revoke = False
+
+    if "name" in body:
+        name = str(body.get("name") or "").strip()
+        if not name:
+            raise errors.invalid("INVALID_ARGUMENT", "显示名称不能为空")
+        fields.append("display_name=?"); params.append(name)
+
+    if body.get("password") is not None:
+        password = str(body.get("password") or "")
+        if len(password) < _MIN_PASSWORD:
+            raise errors.invalid("INVALID_ARGUMENT", f"密码至少 {_MIN_PASSWORD} 位")
+        fields.append("password_hash=?"); params.append(security.hash_password(password))
+        revoke = True
+
+    if body.get("status") is not None:
+        status = str(body.get("status"))
+        if status not in ("active", "disabled"):
+            raise errors.invalid("INVALID_ARGUMENT", "状态只支持 active 或 disabled")
+        if status == "disabled" and user_id == me:
+            raise errors.conflict("SELF_LOCKOUT", "不能停用自己的账号")
+        fields.append("status=?"); params.append(status)
+        if status == "disabled":
+            revoke = True
+
+    if body.get("is_admin") is not None:
+        is_admin = 1 if body.get("is_admin") else 0
+        if is_admin == 0 and user_id == me and row["is_admin"]:
+            raise errors.conflict("SELF_LOCKOUT", "不能取消自己的管理员权限")
+        fields.append("is_admin=?"); params.append(is_admin)
+
+    if not fields:
+        raise errors.invalid("INVALID_ARGUMENT", "没有需要更新的字段")
+
+    params.append(user_id)
+    db.execute(f"UPDATE users SET {', '.join(fields)} WHERE id=?", tuple(params))
+    revoked = 0
+    if revoke:
+        revoked = security.revoke_user_sessions(
+            user_id, keep_token=state["token"] if user_id == me else None)
+    db.log_event("user.update", user_id=me, target=user_id,
+                 detail={"fields": [f.split("=")[0] for f in fields], "revoked_sessions": revoked})
+    payload = _account_payload(db.one("SELECT * FROM users WHERE id=?", (user_id,)))
+    payload["revoked_sessions"] = revoked
+    return payload
+
+
+@router.post("/projects/{project_id}/members", status_code=201)
+def add_member(project_id: str, body: dict = Body(...), state: dict = State) -> dict:
+    """把已有账号加入本项目（项目负责人）。"""
+    _member(project_id, state, owner_only=True)
+    user_id = str(body.get("user_id") or "").strip()
+    role = str(body.get("role") or config.USER_ROLE_ANALYST)
+    if role not in (config.USER_ROLE_OWNER, config.USER_ROLE_ANALYST):
+        raise errors.invalid("INVALID_ARGUMENT", "角色只支持项目负责人或项目分析员")
+    user = db.one("SELECT * FROM users WHERE id=?", (user_id,))
+    if user is None:
+        raise errors.not_found("USER_NOT_FOUND", "账号不存在")
+    if user["status"] != "active":
+        raise errors.conflict("USER_DISABLED", "该账号已停用，不能加入项目")
+    if db.one("SELECT role FROM members WHERE project_id=? AND user_id=?", (project_id, user_id)):
+        raise errors.conflict("ALREADY_MEMBER", "该账号已是项目成员")
+    db.execute("INSERT INTO members(project_id,user_id,role) VALUES(?,?,?)",
+               (project_id, user_id, role))
+    db.log_event("member.add", project_id=project_id, user_id=state["user"]["id"],
+                 target=user_id, detail={"role": role})
+    return {"project_id": project_id, "user_id": user_id, "role": role}
+
+
+@router.delete("/projects/{project_id}/members/{user_id}", status_code=204)
+def remove_member(project_id: str, user_id: str, state: dict = State):
+    """移出项目（项目负责人）。会撤销该账号在本项目的会话。"""
+    _member(project_id, state, owner_only=True)
+    target = db.one("SELECT role FROM members WHERE project_id=? AND user_id=?", (project_id, user_id))
+    if target is None:
+        raise errors.not_found("MEMBER_NOT_FOUND", "该账号不是项目成员")
+    if target["role"] == config.USER_ROLE_OWNER:
+        owners = db.one("SELECT COUNT(*) AS n FROM members WHERE project_id=? AND role=?",
+                        (project_id, config.USER_ROLE_OWNER))["n"]
+        if owners <= 1:
+            raise errors.conflict("LAST_OWNER", "项目至少要保留一名负责人")
+    db.execute("DELETE FROM members WHERE project_id=? AND user_id=?", (project_id, user_id))
+    db.execute("UPDATE sessions SET revoked=1 WHERE user_id=? AND project_id=?",
+               (user_id, project_id))
+    db.log_event("member.remove", project_id=project_id, user_id=state["user"]["id"], target=user_id)
+    return None
 
 
 @router.get("/projects")
