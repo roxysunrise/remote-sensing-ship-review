@@ -318,6 +318,15 @@ components:
             max_det:
               type: integer
               minimum: 1
+            classes:
+              description: 省略、null 或空数组使用全部模型类别。当前 DOTA 权重中 [1] 只检测船舶。
+              oneOf:
+                - type: array
+                  nullable: true
+                  items: { type: integer }
+                - type: string
+                  description: 也接受 all 或逗号分隔的类别 ID。
+              example: [1]
             prompt:
               type: string
 
@@ -330,8 +339,10 @@ components:
         label:
           type: string
           example: ship
+        class_id: { type: integer, nullable: true, example: 1 }
         score:
           type: number
+          nullable: true
           minimum: 0
           maximum: 1
         polygon:
@@ -357,11 +368,26 @@ components:
         frame:
           $ref: '#/components/schemas/Frame'
         model:
-          $ref: '#/components/schemas/ModelInfo'
+          allOf:
+            - $ref: '#/components/schemas/ModelInfo'
+            - type: object
+              properties:
+                classes:
+                  type: array
+                  nullable: true
+                  items: { type: integer }
+                  description: 当前有效的模型类别 ID。
+                classes_filtered:
+                  type: boolean
+                  description: 是否显式按类别过滤。
         elapsed_ms:
           type: number
         count:
           type: integer
+        by_class:
+          type: object
+          description: 按 label 聚合目标数量，空结果返回空对象。
+          additionalProperties: { type: integer, minimum: 0 }
         detections:
           type: array
           items:

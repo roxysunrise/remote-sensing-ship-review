@@ -1,5 +1,31 @@
 # 后端 API（对接 B 方前端） 控制文档
 
+## 2026-11-06 · Worker 发布恢复回归（A 方）
+
+- Worker 先写推理结果文件，再用同一 SQLite 事务发布任务 `done` 和基线版本 `v0`。写入尚未提交时进程退出，任务仍处于可恢复状态，启动恢复将其标为 `SERVER_RESTART`，可通过现有重试接口重新计算。
+- 复跑：`python -m unittest tests.test_backend.BackendTests.test_worker_exit_during_result_publication_and_retry -v`。测试使用合成影像及预测桩，真实子进程在写 v0 前退出；读取原任务状态、触发单任务恢复、重试并检查影像内容、草稿、v0 以及非项目成员读文件、瓦片、草稿和版本的 403 响应。
+- Windows / CPU 使用项目 `best.pt` 运行 `python -m unittest discover -s tests`，80 项通过。仍需单独验收完整 ASGI 进程停止并启动、多人并发与备份恢复。
+- 启动恢复旧库已完成但缺 v0 的任务时，仅从对应任务和尝试号的本地结果文件还原。影像身份、哈希、尺寸、检测数量和旋转框必须与记录及契约一致。损坏、缺失或无法对应的结果仅记录警告，已有版本不覆盖。回归入口 `tests.test_backend.BackendTests.test_recover_missing_legacy_version_from_verified_result`。
+- 本地隔离工作树验证，待 A 方合入候选基线。公共 API 与依赖沿用现有约定。
+
+
+## 增量：`/vision/detect` 多类别（2026-11-06）
+
+- 问题：`/vision/detect` 把 `classes` 固定成 `[ship]`（`detector.predict_image` → `ShipDetector` 内部写死），
+  15 类权重只输出 1 类；网球场地、棒球场、卡车场影像一律返回 0 个框，只有港口图有框。
+- 改动：`backend/vision.py` 新增 `_parse_classes`（缺省/`null`/`"all"` → 全类；列表或 `"1,3"` → 过滤），
+  `detect` 透传 `classes`；响应新增 `by_class`、`detections[].class_id`、`model.classes`、
+  `model.classes_filtered`，`label` 不再兜底成 `ship`；`segment` 的候选 `label`/`class_id` 取自真实检测结果；
+  `detector.py` 的 `_tiling_keys` 增加 `classes`；`ai_assist.py` 候选带上 `label`/`class_id`；
+  `api.py`、`jobs.py` 草稿与 AI 候选入库不再把类别写死成 `1 / "ship"`。
+- 兼容：不传 `classes` 的老调用方现在会收到全部类别（这是本次修复的目的）；需要旧行为显式传 `[1]`。
+  `by_class`/`class_id` 为新增字段，不影响既有消费者。
+- 验证：`python -m scripts.verify_multiclass_http --dir <影像目录>`（TestClient 走真实 `/vision/detect`），
+  4/4 影像出现非 ship 类别（网球场 15、棒球场 10、卡车场 131、港口 105）；
+  显式 `classes=[1]` 时网球场图回到 0 且 `classes_filtered=true`。单测 78 项通过。
+- 未验证：未在 GPU / 生产服务实测；大图缩放到 1600 的漏检不在本次范围。
+- Git：分支 `codex/multi-class-detect`，基线 `codex/integration`。
+
 ## 身份与状态
 
 - 模块 ID：`backend-api`；A 主责（工程骨架 + 计算接入），业务页面与业务数据模型由 B 方提出并确认。

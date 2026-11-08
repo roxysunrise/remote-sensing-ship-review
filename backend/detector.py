@@ -13,7 +13,7 @@ from algorithm.ship_detector import ShipDetector
 
 from . import config, errors
 
-_tiling_keys = ("conf", "iou", "imgsz", "max_det", "tile_size", "stride", "merge_iou")
+_tiling_keys = ("conf", "iou", "imgsz", "max_det", "classes", "tile_size", "stride", "merge_iou")
 
 
 class DetectorService:
@@ -59,6 +59,7 @@ class DetectorService:
                     iou=float(params.get("iou", 0.7)),
                     imgsz=int(params.get("imgsz", 1024)),
                     max_det=int(params.get("max_det", 1000)),
+                    classes=params.get("classes"),
                     on_progress=on_progress,
                     should_cancel=should_cancel,
                     tile_lock=self._run_lock,
@@ -70,6 +71,7 @@ class DetectorService:
                     iou=float(params.get("iou", 0.7)),
                     imgsz=int(params.get("imgsz", 1024)),
                     max_det=int(params.get("max_det", 1000)),
+                    classes=params.get("classes"),
                 )
         except DetectionError as exc:
             raise errors.from_detection_error(exc) from exc
@@ -86,6 +88,7 @@ class DetectorService:
                     iou=float(params.get("iou", 0.7)),
                     imgsz=int(params.get("imgsz", 1024)),
                     max_det=int(params.get("max_det", 1000)),
+                    classes=params.get("classes"),
                 )
             except DetectionError as exc:
                 raise errors.from_detection_error(exc) from exc

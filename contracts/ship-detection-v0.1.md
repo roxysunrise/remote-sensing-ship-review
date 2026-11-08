@@ -29,7 +29,11 @@ CLI：`python -m algorithm.ship_detector IMAGE --output DIR --device cpu`。成�
 | warnings | 可能达到数量上限、全图缩小等提示 |
 | detections | 每项含id、polygon、class_id、class_name、confidence |
 
-`id` 是本次结果内从1开始的顺序号，不是跨图跟踪ID。`class_id` 保留原模型编号，本权重ship=1；业务按class_name识别。
+`id` 是本次结果内从1开始的顺序号，不是跨图跟踪ID。`class_id` 保留原模型编号，本权重 15 类、ship=1；业务按class_name识别。
+
+`parameters.classes` 记录本次**实际生效**的类别：默认 `null` 表示不做类别过滤（输出模型全部类别）；
+传入 id 列表时只输出这些类，并置 `parameters.classes_filtered=true`。早先实现固定输出 ship（相当于
+`classes=[1]`），2026-11-06 起改为调用方可控，默认全类；需要旧行为时显式传 `classes=[1]`。
 
 `polygon` 为4×2浮点数，单位像素，原点左上，x向右、y向下；沿画面顺时针排列，起点取最小(y,x)顶点。尺寸是原始解码图像尺寸，不是网络输入尺寸；不归一化，不在展示端二次缩放。不输出角度和宽高，避免角度制混用；旋转框不代表船首方向。
 

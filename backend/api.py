@@ -637,8 +637,8 @@ def _fill_draft(task_id: str, detections: list[dict], base_version: str) -> None
                 "INSERT OR IGNORE INTO draft_detections(task_id,detection_id,polygon,class_id,"
                 "class_name,confidence,source_tile_id,review_state,origin,note,ai_candidate_id)"
                 " VALUES(?,?,?,?,?,?,?,?,?,?,NULL)",
-                (task_id, det["id"], json.dumps(det["polygon"]), det.get("class_id", 1),
-                 det.get("class_name", "ship"), det.get("confidence"), det.get("source_tile_id"),
+                (task_id, det["id"], json.dumps(det["polygon"]), det.get("class_id"),
+                 det.get("class_name") or "object", det.get("confidence"), det.get("source_tile_id"),
                  det.get("review_state", "pending"), det.get("origin", "model"), det.get("note")),
             )
 
@@ -726,6 +726,8 @@ def add_detection(task_id: str, body: dict = Body(...), state: dict = State) -> 
     except DetectionError as exc:
         raise errors.from_detection_error(exc) from exc
 
+    class_name = str(body.get("label") or body.get("class_name") or "object")
+    class_id = body.get("class_id")
     origin = body.get("origin") or "manual"
     if origin not in {"manual", "ai"}:
         raise errors.invalid("INVALID_ARGUMENT", "origin 只能是 manual 或 ai")
@@ -739,7 +741,7 @@ def add_detection(task_id: str, body: dict = Body(...), state: dict = State) -> 
         "INSERT INTO draft_detections(task_id,detection_id,polygon,class_id,class_name,confidence,"
         "source_tile_id,review_state,origin,note,ai_candidate_id)"
         " VALUES(?,?,?,?,?,NULL,NULL,?,?,?,?)",
-        (task_id, next_id, json.dumps(polygon), 1, "ship", review_state, origin,
+        (task_id, next_id, json.dumps(polygon), class_id, class_name, review_state, origin,
          body.get("note"), body.get("candidate_id")),
     )
     db.execute("UPDATE draft_state SET updated_at=? WHERE task_id=?", (db.now(), task_id))
@@ -762,8 +764,8 @@ def reset_draft(task_id: str, body: dict = Body(...), state: dict = State) -> di
                 "INSERT INTO draft_detections(task_id,detection_id,polygon,class_id,class_name,"
                 "confidence,source_tile_id,review_state,origin,note,ai_candidate_id)"
                 " VALUES(?,?,?,?,?,?,?,?,?,?,NULL)",
-                (task_id, det["id"], json.dumps(det["polygon"]), det.get("class_id", 1),
-                 det.get("class_name", "ship"), det.get("confidence"), det.get("source_tile_id"),
+                (task_id, det["id"], json.dumps(det["polygon"]), det.get("class_id"),
+                 det.get("class_name") or "object", det.get("confidence"), det.get("source_tile_id"),
                  det.get("review_state", "pending"), det.get("origin", "model"), det.get("note")),
             )
         conn.execute("INSERT INTO draft_state(task_id,base_version,updated_at) VALUES(?,?,?)"
@@ -1182,7 +1184,7 @@ def accept_candidate(candidate_id: str, body: dict = Body(default_factory=dict),
     db.execute(
         "INSERT INTO draft_detections(task_id,detection_id,polygon,class_id,class_name,confidence,"
         "source_tile_id,review_state,origin,note,ai_candidate_id) VALUES(?,?,?,?,?,NULL,NULL,?,?,?,?)",
-        (task["id"], next_id, candidate["polygon"], 1, "ship", "confirmed", "ai",
+        (task["id"], next_id, candidate["polygon"], None, "object", "confirmed", "ai",
          f"AI 候选 {candidate_id}", candidate_id),
     )
     db.execute("UPDATE candidates SET status='accepted' WHERE id=?", (candidate_id,))
