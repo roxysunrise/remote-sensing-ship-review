@@ -23,8 +23,8 @@ const IMG_W = SCENE.image.width;
 const IMG_H = SCENE.image.height;
 const TILES = SCENE.tiling.tiles;
 const COLORS = {
-  pending: '#e0a13a', confirmed: '#45b06a', modified: '#4a9eff',
-  deleted: '#e2564a', ai: '#a274ff', region: '#38b2a3'
+  pending: '#8fe9ff', confirmed: '#5ff3e4', modified: '#2f5bff',
+  deleted: '#d92d50', ai: '#d8ff4a', region: '#2f5bff'
 };
 const STATE_LABEL = { pending: '未检查', confirmed: '已确认', modified: '已修改', deleted: '已删除' };
 
@@ -210,6 +210,10 @@ class Viewport {
     if (IMG.complete && IMG.naturalWidth) {
       ctx.imageSmoothingEnabled = this.scale < 1;
       ctx.drawImage(IMG, this.ox, this.oy, IMG_W * this.scale, IMG_H * this.scale);
+      // 被检测影像与海面背景之间留一条细边，明确“影像”和“四周”的边界
+      ctx.strokeStyle = 'rgba(95, 243, 228, .42)';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(this.ox - .5, this.oy - .5, IMG_W * this.scale + 1, IMG_H * this.scale + 1);
     }
     this.onDraw(ctx, this);
   }
@@ -509,11 +513,11 @@ function drawWorkbench(ctx, vp) {
 
   if (state.showTiles) {
     ctx.save();
-    ctx.strokeStyle = 'rgba(74,158,255,.35)';
+    ctx.strokeStyle = 'rgba(255,255,255,.28)';
     ctx.lineWidth = 1;
     ctx.setLineDash([6, 5]);
     ctx.font = '10px monospace';
-    ctx.fillStyle = 'rgba(74,158,255,.7)';
+    ctx.fillStyle = 'rgba(255,255,255,.62)';
     for (const t of tilesNow()) {
       const [x, y] = vp.w2s(t.x, t.y);
       ctx.strokeRect(x, y, t.width * vp.scale, t.height * vp.scale);
@@ -535,8 +539,8 @@ function drawWorkbench(ctx, vp) {
     if (d.review_state === 'deleted') ctx.setLineDash([4, 3]);
     ctx.stroke();
     ctx.setLineDash([]);
-    if (sel) { ctx.fillStyle = 'rgba(56,178,163,.16)'; ctx.fill(); }
-    else if (d.review_state === 'pending' && vp.scale > 0.22) { ctx.fillStyle = 'rgba(224,161,58,.07)'; ctx.fill(); }
+    if (sel) { ctx.fillStyle = 'rgba(47,91,255,.14)'; ctx.fill(); }
+    else if (d.review_state === 'pending' && vp.scale > 0.22) { ctx.fillStyle = 'rgba(184,184,184,.06)'; ctx.fill(); }
 
     if (state.showLabels && vp.scale > 0.16) {
       ctx.font = '600 11px "Segoe UI", sans-serif';
@@ -559,7 +563,7 @@ function drawWorkbench(ctx, vp) {
     ctx.setLineDash([6, 4]);
     ctx.lineWidth = 2;
     ctx.strokeStyle = COLORS.ai;
-    ctx.fillStyle = 'rgba(162,116,255,.18)';
+    ctx.fillStyle = 'rgba(184,184,184,.14)';
     ctx.fill();
     ctx.stroke();
     ctx.restore();
@@ -571,26 +575,26 @@ function drawWorkbench(ctx, vp) {
     const c = vp.w2s(h.box.cx, h.box.cy);
     const r = vp.w2s(h.rotate[0], h.rotate[1]);
     ctx.save();
-    ctx.strokeStyle = '#38b2a3';
+    ctx.strokeStyle = '#2f5bff';
     ctx.lineWidth = 1;
     ctx.beginPath(); ctx.moveTo(c[0], c[1]); ctx.lineTo(r[0], r[1]); ctx.stroke();
     for (const pt of h.corners) {
       const [x, y] = vp.w2s(pt[0], pt[1]);
       ctx.fillStyle = '#0b1219';
-      ctx.strokeStyle = '#38b2a3';
+      ctx.strokeStyle = '#2f5bff';
       ctx.lineWidth = 1.6;
       ctx.beginPath(); ctx.rect(x - 4, y - 4, 8, 8); ctx.fill(); ctx.stroke();
     }
     ctx.beginPath();
     ctx.arc(r[0], r[1], 5.5, 0, Math.PI * 2);
-    ctx.fillStyle = '#38b2a3'; ctx.fill();
+    ctx.fillStyle = '#2f5bff'; ctx.fill();
     ctx.restore();
   }
 
   if (state.ai.status === 'requesting') {
     ctx.save();
     ctx.font = '12px "Segoe UI", sans-serif';
-    ctx.fillStyle = '#a274ff';
+    ctx.fillStyle = '#b8b8b8';
     ctx.fillText('AI 候选生成中…', 16, 24);
     ctx.restore();
   }
@@ -1044,11 +1048,11 @@ function drawStats(ctx, vp) {
     for (let i = 1; i < sp.length; i++) ctx.lineTo(sp[i][0], sp[i][1]);
     ctx.closePath();
     ctx.lineWidth = 1.2;
-    ctx.strokeStyle = d.review_state === 'deleted' ? 'rgba(226,86,74,.45)' : COLORS[d.review_state];
+    ctx.strokeStyle = d.review_state === 'deleted' ? 'rgba(217,45,80,.55)' : COLORS[d.review_state];
     ctx.stroke();
     if (d.review_state !== 'deleted') {
       const c = vp.w2s(...G.centroid(d.polygon));
-      ctx.fillStyle = 'rgba(56,178,163,.55)';
+      ctx.fillStyle = 'rgba(47,91,255,.55)';
       ctx.fillRect(c[0] - 1.5, c[1] - 1.5, 3, 3);
     }
   }
@@ -1061,10 +1065,10 @@ function drawStats(ctx, vp) {
     ctx.lineWidth = 1.8;
     ctx.strokeStyle = COLORS.region;
     ctx.stroke();
-    if (state.regionClosed) { ctx.fillStyle = 'rgba(56,178,163,.13)'; ctx.fill(); }
+    if (state.regionClosed) { ctx.fillStyle = 'rgba(47,91,255,.14)'; ctx.fill(); }
     for (const [x, y] of sp) {
       ctx.beginPath(); ctx.arc(x, y, 3.5, 0, Math.PI * 2);
-      ctx.fillStyle = '#38b2a3'; ctx.fill();
+      ctx.fillStyle = '#2f5bff'; ctx.fill();
     }
   }
 }
@@ -1337,13 +1341,6 @@ function renderProject() {
   $('#pj-count').textContent = state.baseline.length || SCENE.count;
   $('#pj-cand').textContent = state.result ? state.result.tiling.candidate_count : SCENE.tiling.candidate_count;
   $('#pj-tiles').textContent = tilesNow().length;
-  $('#pj-members').innerHTML = p.members.map(m => `
-    <div class="member">
-      <div class="avatar">${m.name.slice(0, 1).toUpperCase()}</div>
-      <div style="flex:1">${m.name}${m.name === state.user.name ? ' <span class="tag confirmed">你</span>' : ''}
-        <div class="dim" style="font-size:11.5px">${m.role}</div></div>
-      <span class="tag">${m.role === '项目负责人' ? '管理' : '读写'}</span>
-    </div>`).join('');
 }
 
 /* ---------------------------------------------------------------------- nav */
@@ -1383,6 +1380,16 @@ async function restoreSession() {
   const session = window.AuthSession && AuthSession.read();
   if (!session) return false;
 
+  // mock 适配器把会话放在内存里；刷新后先用已保存的令牌把它接回来。
+  if (API.mode === 'mock' && typeof API.resumeSession === 'function') {
+    try {
+      await API.resumeSession(session.token, session.user.project.id);
+    } catch (_) {
+      AuthSession.clear();
+      return false;
+    }
+  }
+
   let project = null;
   try {
     project = await API.getProject(session.user.project.id);
@@ -1421,6 +1428,19 @@ async function doLogin(username, password, projectId) {
     const project = await API.getProject(r.user.project.id);
     state.user = r.user;
     state.project = project;
+
+    // 登录一次后，跨页面 / 刷新不再要求重登（7 天）。
+    if (window.AuthSession) {
+      try {
+        AuthSession.save(
+          r.token || ('mock-token-' + r.user.id),
+          r.user,
+          true,
+          7 * 24 * 60 * 60 * 1000
+        );
+      } catch (_) { /* 隐私模式禁用存储时仍可本次使用 */ }
+    }
+
     $('#ctx-user').textContent = state.user.name;
     $('#ctx-role').textContent = state.user.role;
     $('#ctx-project').textContent = state.user.project.name;
@@ -1436,7 +1456,6 @@ async function doLogin(username, password, projectId) {
 }
 
 async function doLogout(silent) {
-  const hadSession = !!(window.AuthSession && AuthSession.read());
   try { await API.logout(); } catch (_) { /* ignore */ }
   if (window.AuthSession) AuthSession.clear();
   state.user = null;
@@ -1447,8 +1466,8 @@ async function doLogout(silent) {
   state.image = null;
   resetUpload();
 
-  // 真实后端模式，或本次会话来自独立登录页：退出后回到登录页
-  if ((API.mode === 'http' || hadSession) && window.AuthSession) {
+  // 真实后端模式：退出后回到独立登录页；mock 模式留在本页显示登录门。
+  if (API.mode === 'http' && window.AuthSession) {
     const target = AuthSession.loginUrl();
     location.replace(target + (target.includes('?') ? '&' : '?') + 'logout=1');
     return;
@@ -1480,8 +1499,9 @@ function bindGlobal() {
   });
 
   window.addEventListener('resize', () => {
-    if (WB.vp && state.view === 'workbench') { WB.vp.resize(); WB.vp.draw(); }
-    if (ST.vp && state.view === 'stats') { ST.vp.resize(); ST.vp.draw(); }
+    // 视图尺寸变化后重新适配整幅影像，避免窗口放大后影像仍停在手机端的小比例
+    if (WB.vp && state.view === 'workbench') { WB.vp.resize(); WB.vp.fit(); WB.vp.draw(); }
+    if (ST.vp && state.view === 'stats') { ST.vp.resize(); ST.vp.fit(); ST.vp.draw(); }
   });
 
   window.addEventListener('keydown', ev => {

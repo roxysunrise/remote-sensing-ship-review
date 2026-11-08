@@ -330,6 +330,22 @@
         return { token: session.token, user: publicUser() };
       },
 
+      /* 刷新页面后用已保存的演示令牌恢复内存会话；
+       * 仅用于 mock，真实后端仍走 AuthSession + Bearer。 */
+      async resumeSession(token, projectId) {
+        await net();
+        const m = /^mock-token-(.+)$/.exec(String(token || ''));
+        const userId = m && m[1];
+        const u = userId && (db.users[userId] || Object.values(db.users).find(x => x.id === userId));
+        const project = db.projects[projectId];
+        if (!u || !project || !project.members.some(x => x.id === u.id)) {
+          session = null;
+          throw apiError(401, 'UNAUTHENTICATED', '会话已失效，请重新登录');
+        }
+        session = { userId: u.id, projectId, token: 'mock-token-' + u.id };
+        return { user: publicUser() };
+      },
+
       async logout() {
         await net();
         session = null;

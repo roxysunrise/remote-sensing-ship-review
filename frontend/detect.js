@@ -28,10 +28,10 @@
     c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
   const COLORS = {
-    model: '#4a9eff',
-    manual: '#38b2a3',
-    ai: '#a274ff',
-    held: '#e0a13a'
+    model: '#8fe9ff',
+    manual: '#5ff3e4',
+    ai: '#d8ff4a',
+    held: '#8fa3ad'
   };
   const ORIGIN_LABEL = { model: '模型', manual: '手工', ai: 'AI 辅助' };
 
@@ -66,7 +66,13 @@
     drag: null,
     space: false,
     seq: { a: 0 },
-    seekDragging: false
+    seekDragging: false,
+    images: [],
+    activeImageId: null,
+    batchMode: false,
+    batchRunning: false,
+    batchProgress: '',
+    result: { open: false, busy: false }
   };
 
   let canvas, ctx, mediaImage = null, mediaVideo = null;
@@ -105,7 +111,8 @@
   function cacheEls() {
     const ids = [
       'dt-media', 'dt-res', 'dt-frame', 'dt-api', 'dt-mode-badge',
-      'dt-drop', 'dt-pick', 'dt-demo-img', 'dt-demo-video', 'dt-file', 'dt-meta',
+      'dt-drop', 'dt-pick', 'dt-pick-folder', 'dt-demo-img', 'dt-demo-video', 'dt-file', 'dt-folder', 'dt-meta',
+      'dt-batch-sec', 'dt-batch-count', 'dt-batch-list', 'dt-batch-all', 'dt-batch-clear',
       'dt-count', 'dt-tabs', 'dt-list', 'dt-export',
       'dt-tools', 'dt-detect', 'dt-auto', 'dt-clear', 'dt-fit', 'dt-one',
       'dt-labels', 'dt-coords', 'dt-hold',
@@ -113,6 +120,9 @@
       'dt-drawinfo', 'dt-busy', 'dt-busy-text', 'dt-empty',
       'dt-vbar', 'dt-play', 'dt-prev', 'dt-next', 'dt-time', 'dt-seek',
       'dt-markers', 'dt-speed', 'dt-fps', 'dt-auto-state',
+      'dt-result', 'dt-result-canvas', 'dt-result-state', 'dt-result-frame', 'dt-result-time',
+      'dt-result-hits', 'dt-result-keys', 'dt-result-hold', 'dt-result-play',
+      'dt-result-prev', 'dt-result-next', 'dt-result-close',
       'dt-sel-tag', 'dt-detail', 'dt-ai-mode', 'dt-ai', 'dt-toasts'
     ];
     for (const id of ids) {
@@ -209,50 +219,300 @@
     });
   }
 
+  function loadImageElement(src) {
+    return new Promise((resolve, reject) => {
+      const im = new Image();
+      im.decoding = 'async';
+      im.onload = () => resolve(im);
+      im.onerror = () => reject(new Error('图片解码失败'));
+      im.src = src;
+    });
+  }
+
+  function makeImageRecord(img, src, name, opts) {
+    return {
+      id: 'img_' + Math.random().toString(36).slice(2, 9),
+      name: name || 'image',
+      url: src,
+      ownedUrl: opts.owned ? src : null,
+      demo: !!opts.demo,
+      image: img,
+      width: img.naturalWidth,
+      height: img.naturalHeight,
+      annotations: [],
+      detections: new Map(),
+      sessionId: null,
+      lastDetect: null,
+      seq: { a: 0 }
+    };
+  }
+
+  function currentImageRecord() {
+    if (!S.activeImageId) return null;
+    return S.images.find(r => r.id === S.activeImageId) || null;
+  }
+
+  function saveActiveImageState() {
+    const rec = currentImageRecord();
+    if (!rec) return;
+    rec.annotations = S.annotations;
+    rec.detections = S.detections;
+    rec.sessionId = S.sessionId;
+    rec.lastDetect = S.lastDetect;
+    rec.seq = S.seq;
+  }
+
+  function resetInteractionState() {
+    S.selectedId = null;
+    S.hoverId = null;
+    S.draft = null;
+    S.polyDraft = [];
+    S.pointer = null;
+    S.sessionError = null;
+    S.lastFrameIndex = -1;
+    S.auto = false;
+    S.lastAutoAt = 0;
+    S.ai = {
+      status: 'idle', roi: null, candidates: [], active: 0,
+      meta: null, error: null, prompt: S.ai.prompt || '船舶', lastReq: null
+    };
+  }
+
+  async function activateImageRecord(rec, opts) {
+    opts = opts || {};
+    if (!rec) return;
+    saveActiveImageState();
+    stopPlayback();
+    if (S.media && S.media.kind === 'video') {
+      releaseMediaUrl();
+    }
+    mediaVideo.pause();
+    mediaVideo.removeAttribute('src');
+    try { mediaVideo.load(); } catch (_) { /* ignore */ }
+
+    S.activeImageId = rec.id;
+    mediaImage = rec.image;
+    const index = Math.max(0, S.images.indexOf(rec));
+    S.media = {
+      kind: 'image',
+      name: rec.name,
+      width: rec.width,
+      height: rec.height,
+      duration: 0,
+      fps: 0,
+      demo: rec.demo,
+      batch: S.batchMode || S.images.length > 1,
+      batchIndex: index,
+      ownedUrl: null
+    };
+    S.annotations = rec.annotations;
+    S.detections = rec.detections;
+    S.sessionId = rec.sessionId;
+    S.lastDetect = rec.lastDetect;
+    S.seq = rec.seq;
+    resetInteractionState();
+    closeResult();
+    S.view.fitted = false;
+    resizeCanvas();
+    fitView();
+    els.empty.classList.add('hidden');
+    renderAll();
+    if (opts.createSession !== false && !S.sessionId) {
+      await createSessionForMedia();
+    }
+    saveActiveImageState();
+    renderBatch();
+  }
+
   async function loadImageSource(src, name, opts) {
     opts = opts || {};
+    if (S.batchRunning) {
+      toast('批量检测进行中，请稍候再切换图片', 'err');
+      return;
+    }
     setBusy('load', '载入图片…');
     try {
-      const img = await new Promise((resolve, reject) => {
-        const im = new Image();
-        im.decoding = 'async';
-        im.onload = () => resolve(im);
-        im.onerror = () => reject(new Error('图片解码失败'));
-        im.src = src;
-      });
-      stopPlayback();
-      releaseMediaUrl();
-      mediaImage = img;
-      mediaVideo.pause();
-      mediaVideo.removeAttribute('src');
-      try { mediaVideo.load(); } catch (_) { /* ignore */ }
-      S.media = {
-        kind: 'image',
-        name: name || 'image',
-        width: img.naturalWidth,
-        height: img.naturalHeight,
-        duration: 0,
-        fps: 0,
-        demo: !!opts.demo,
-        ownedUrl: opts.owned ? src : null
-      };
-      resetMediaState();
-      S.view.fitted = false;
-      resizeCanvas();
-      fitView();
-      els.empty.classList.add('hidden');
-      renderAll();
-      await createSessionForMedia();
+      const img = await loadImageElement(src);
+      let rec = null;
+      if (opts.demo) {
+        rec = S.images.find(r => r.demo && r.name === (name || 'harbor.png')) || null;
+      }
+      if (!rec) {
+        rec = makeImageRecord(img, src, name, opts);
+        if (!opts.demo) S.batchMode = true;
+        S.images.push(rec);
+      }
+      await activateImageRecord(rec);
+      renderBatch();
       toast('已载入图片 ' + S.media.name + ' · ' + S.media.width + ' × ' + S.media.height, 'ok');
     } finally {
       setBusy(null);
     }
   }
 
+  function isImageFile(file) {
+    return /^image\//.test(file.type) || /\.(png|jpe?g|webp|bmp)$/i.test(file.name);
+  }
+
+  function isVideoFile(file) {
+    return /^video\//.test(file.type) || /\.(mp4|webm|mov|m4v|ogv)$/i.test(file.name);
+  }
+
+  async function readImageRecord(file) {
+    if (file.size > 40 * 1024 * 1024) throw new Error(file.name + ' 超过 40 MB');
+    const url = URL.createObjectURL(file);
+    try {
+      const img = await loadImageElement(url);
+      return makeImageRecord(img, url, file.webkitRelativePath || file.name, { owned: true });
+    } catch (err) {
+      URL.revokeObjectURL(url);
+      throw err;
+    }
+  }
+
+  async function addImageFiles(files, opts) {
+    opts = opts || {};
+    let list = Array.from(files || []).filter(isImageFile);
+    if (!list.length) return [];
+    const room = Math.max(0, 80 - S.images.length);
+    if (list.length > room) {
+      toast('单批最多 80 张图片，本次只取前 ' + room + ' 张', 'err');
+      list = list.slice(0, room);
+    }
+    if (!list.length) return [];
+    list.sort((a, b) => {
+      const an = a.webkitRelativePath || a.name;
+      const bn = b.webkitRelativePath || b.name;
+      return an.localeCompare(bn, 'zh-CN');
+    });
+    const records = [];
+    let demoCleaned = false;
+    setBusy('load', '读取图片 0/' + list.length);
+    try {
+      for (let i = 0; i < list.length; i++) {
+        try {
+          const rec = await readImageRecord(list[i]);
+          if (!demoCleaned && S.images.length === 1 && S.images[0].demo) {
+            S.images = [];
+            S.activeImageId = null;
+            demoCleaned = true;
+          }
+          S.images.push(rec);
+          records.push(rec);
+        } catch (err) {
+          toast(err.message, 'err');
+        }
+        els.busyText.textContent = '读取图片 ' + (i + 1) + '/' + list.length;
+      }
+    } finally {
+      setBusy(null);
+    }
+    if (!records.length) return [];
+    S.batchMode = S.batchMode || records.length > 1 || !!opts.folder || S.images.length > 1;
+    renderBatch();
+    if (opts.activate !== false) {
+      await activateImageRecord(records[0], { createSession: false });
+    }
+    toast('已加入 ' + records.length + ' 张图片，共 ' + S.images.length + ' 张', 'ok');
+    return records;
+  }
+
+  function imageHitCount(rec) {
+    let n = 0;
+    for (const arr of rec.detections.values()) n += arr.length;
+    return n;
+  }
+
+  function removeImageRecord(id) {
+    if (S.batchRunning) {
+      toast('批量检测进行中，暂不能移除图片', 'err');
+      return;
+    }
+    const idx = S.images.findIndex(r => r.id === id);
+    if (idx < 0) return;
+    const rec = S.images[idx];
+    const wasActive = rec.id === S.activeImageId;
+    if (wasActive) saveActiveImageState();
+    if (rec.ownedUrl) {
+      try { URL.revokeObjectURL(rec.ownedUrl); } catch (_) { /* ignore */ }
+    }
+    S.images.splice(idx, 1);
+    if (!S.images.length) S.batchMode = false;
+    if (wasActive) {
+      if (S.images.length) {
+        activateImageRecord(S.images[Math.min(idx, S.images.length - 1)], { createSession: false });
+      } else {
+        clearMediaState();
+      }
+    }
+    renderBatch();
+  }
+
+  function clearBatch() {
+    if (S.batchRunning) {
+      toast('批量检测进行中，暂不能清空', 'err');
+      return;
+    }
+    if (S.media && S.media.kind === 'image') clearMediaState();
+    for (const rec of S.images) {
+      if (rec.ownedUrl) {
+        try { URL.revokeObjectURL(rec.ownedUrl); } catch (_) { /* ignore */ }
+      }
+    }
+    S.images = [];
+    S.batchMode = false;
+    renderBatch();
+  }
+
+  async function runBatchDetection() {
+    if (S.batchRunning || S.busy || !S.images.length) return;
+    if (S.media && S.media.kind === 'video') {
+      toast('批量检测会切换到图片批次，视频需要重新载入');
+    }
+    S.batchRunning = true;
+    S.batchProgress = '';
+    const list = S.images.slice();
+    let ok = 0;
+    let failed = 0;
+    renderBatch();
+    try {
+      for (let i = 0; i < list.length; i++) {
+        const rec = list[i];
+        if (!S.images.includes(rec)) continue;
+        S.batchProgress = (i + 1) + '/' + list.length;
+        renderBatch();
+        await activateImageRecord(rec, { createSession: false });
+        await runDetection({ auto: true, batch: true });
+        saveActiveImageState();
+        if (rec.detections.has(0)) {
+          ok++;
+        } else {
+          failed++;
+          if (failed >= 3) {
+            toast('连续 3 张检测失败，已停止批量检测', 'err');
+            break;
+          }
+        }
+        renderBatch();
+      }
+    } finally {
+      S.batchRunning = false;
+      S.batchProgress = '';
+      renderBatch();
+      updateButtons();
+    }
+    toast('批量检测完成：' + ok + ' 张已处理' + (failed ? '，' + failed + ' 张未返回结果' : ''), 'ok');
+  }
+
   async function loadVideoSource(src, name, opts) {
     opts = opts || {};
+    if (S.batchRunning) {
+      toast('批量检测进行中，请稍候再载入视频', 'err');
+      return;
+    }
     setBusy('load', '载入视频…');
     try {
+      saveActiveImageState();
       stopPlayback();
       const v = mediaVideo;
       v.pause();
@@ -281,6 +541,7 @@
       }
       releaseMediaUrl();
       mediaImage = null;
+      S.activeImageId = null;
       S.media = {
         kind: 'video',
         name: name || 'video',
@@ -293,6 +554,7 @@
       };
       v.currentTime = 0;
       resetMediaState();
+      closeResult();
       S.view.fitted = false;
       resizeCanvas();
       fitView();
@@ -334,22 +596,25 @@
   function resetMediaState() {
     S.annotations = [];
     S.detections = new Map();
-    S.selectedId = null;
-    S.hoverId = null;
-    S.draft = null;
-    S.polyDraft = [];
-    S.pointer = null;
     S.sessionId = null;
-    S.sessionError = null;
     S.lastDetect = null;
-    S.lastFrameIndex = -1;
-    S.auto = false;
-    S.lastAutoAt = 0;
     S.seq = { a: 0 };
-    S.ai = {
-      status: 'idle', roi: null, candidates: [], active: 0,
-      meta: null, error: null, prompt: S.ai.prompt || '船舶', lastReq: null
-    };
+    resetInteractionState();
+  }
+
+  function clearMediaState() {
+    stopPlayback();
+    releaseMediaUrl();
+    mediaVideo.pause();
+    mediaVideo.removeAttribute('src');
+    try { mediaVideo.load(); } catch (_) { /* ignore */ }
+    mediaImage = null;
+    S.media = null;
+    S.activeImageId = null;
+    resetMediaState();
+    closeResult();
+    els.empty.classList.remove('hidden');
+    renderAll();
   }
 
   function stopPlayback() {
@@ -359,6 +624,7 @@
   async function createSessionForMedia() {
     try {
       await ensureSession();
+      saveActiveImageState();
     } catch (err) {
       S.sessionError = err;
       toast('推理会话创建失败：' + err.message, 'err');
@@ -544,6 +810,7 @@
     for (const item of items) drawItem(item);
     drawAiOverlay();
     drawDraft();
+    if (S.result.open) drawResultFrame();
   }
 
   function drawMedia() {
@@ -558,7 +825,7 @@
     try {
       ctx.drawImage(src, ox, oy, m.width * s, m.height * s);
     } catch (_) { /* 解码中的视频帧 */ }
-    ctx.strokeStyle = 'rgba(45,63,82,.85)';
+    ctx.strokeStyle = 'rgba(95, 243, 228, .42)';
     ctx.lineWidth = 1;
     ctx.strokeRect(ox - 0.5, oy - 0.5, m.width * s + 1, m.height * s + 1);
   }
@@ -630,7 +897,7 @@
     let ly = tl[1] - h - 4;
     if (ly < 2) ly = tl[1] + 4;
     ctx.fillStyle = 'rgba(9,15,21,.88)';
-    ctx.strokeStyle = 'rgba(45,63,82,.9)';
+    ctx.strokeStyle = 'rgba(52,76,90,.85)';
     ctx.lineWidth = 1;
     roundRect(ctx, lx, ly, w + 10, h, 4);
     ctx.fill();
@@ -707,7 +974,7 @@
       pathPolygon(cand.polygon, true);
       ctx.save();
       ctx.setLineDash(active ? [7, 4] : [4, 4]);
-      ctx.strokeStyle = active ? '#c7a8ff' : 'rgba(162,116,255,.55)';
+      ctx.strokeStyle = active ? '#ffffff' : 'rgba(184,184,184,.55)';
       ctx.lineWidth = active ? 2.2 : 1.2;
       ctx.stroke();
       if (active) {
@@ -728,7 +995,7 @@
       ctx.fillStyle = 'rgba(9,15,21,.9)';
       roundRect(ctx, lx, ly, w + 10, 17, 4);
       ctx.fill();
-      ctx.fillStyle = active ? '#c7a8ff' : 'rgba(199,168,255,.7)';
+      ctx.fillStyle = active ? '#ffffff' : 'rgba(184,184,184,.75)';
       ctx.fillText(text, lx + 5, ly + 12);
       ctx.restore();
     });
@@ -780,7 +1047,7 @@
       if (pts.length >= 3) {
         ctx.beginPath();
         ctx.arc(pts[0][0], pts[0][1], 7, 0, Math.PI * 2);
-        ctx.strokeStyle = 'rgba(56,178,163,.7)';
+        ctx.strokeStyle = 'rgba(47,91,255,.85)';
         ctx.setLineDash([3, 3]);
         ctx.stroke();
       }
@@ -836,7 +1103,7 @@
   }
 
   function onPointerDown(ev) {
-    if (!S.media) return;
+    if (!S.media || S.batchRunning) return;
     // 标注 / 框选必须绑定稳定的一帧，交互开始即暂停
     if (S.media.kind === 'video' && !mediaVideo.paused) mediaVideo.pause();
     const [sx, sy] = localPoint(ev);
@@ -1253,6 +1520,7 @@
   async function runDetection(opts) {
     opts = opts || {};
     if (!S.media || S.busy) return;
+    if (S.batchRunning && !opts.batch) return;
     if (S.media.kind === 'video' && !opts.auto && !mediaVideo.paused) mediaVideo.pause();
 
     const idx = currentFrameIndex();
@@ -1272,6 +1540,7 @@
     setBusy('detect', opts.auto ? '连续检测中…' : '检测中…', !opts.auto);
     try {
       await ensureSession();
+      const wantsTiling = S.media.kind === 'image' && Math.max(S.media.width, S.media.height) > 1200;
       const res = await window.DetectAPI.detect({
         session_id: S.sessionId,
         kind: S.media.kind,
@@ -1285,6 +1554,7 @@
           mode: opts.mode || 'full',
           conf: 0.25,
           max_det: 80,
+          tiling: wantsTiling,
           prompt: S.ai.prompt
         }
       });
@@ -1304,19 +1574,26 @@
         if (dets.length) toast('检出 ' + dets.length + ' 个目标 · ' + Math.round(res.elapsed_ms || 0) + ' ms', 'ok');
         else toast('未检出目标，可尝试 AI 辅助框选或手动画框');
       }
+      saveActiveImageState();
+      renderBatch();
+      if (S.media.kind === 'video' && S.detections.size) openResult();
       renderHeader();
       renderList();
       renderMarkers();
+      renderResult();
       if (!opts.auto) renderDetail();
       draw();
     } catch (err) {
-      toastError(err);
-      if (opts.auto) {
-        S.auto = false;
-        renderVideoBar();
-        toast('连续检测已自动停止，请检查接口后重试', 'err');
+      if (!opts.batch) {
+        toastError(err);
+        if (opts.auto) {
+          S.auto = false;
+          renderVideoBar();
+          toast('连续检测已自动停止，请检查接口后重试', 'err');
+        }
       }
     } finally {
+      saveActiveImageState();
       setBusy(null);
       renderHeader();
     }
@@ -1353,6 +1630,12 @@
     }
     S.detections.delete(idx);
     if (S.selectedId && !storedItem(S.selectedId)) S.selectedId = null;
+    saveActiveImageState();
+    renderBatch();
+    if (S.media.kind === 'video') {
+      if (S.detections.size) renderResult();
+      else closeResult();
+    }
     renderList();
     renderDetail();
     renderMarkers();
@@ -1364,7 +1647,7 @@
 
   async function runSegment(opts) {
     opts = opts || {};
-    if (!S.media || S.busy) return;
+    if (!S.media || S.busy || S.batchRunning) return;
     if (S.media.kind === 'video' && !mediaVideo.paused) mediaVideo.pause();
 
     const idx = currentFrameIndex();
@@ -1428,6 +1711,7 @@
       S.ai.error = err;
       toastError(err);
     } finally {
+      saveActiveImageState();
       setBusy(null);
       renderAi();
       draw();
@@ -1456,6 +1740,7 @@
       createdAt: Date.now()
     };
     S.annotations.push(item);
+    saveActiveImageState();
     clearAi();
     setTool('select');
     selectItem(item.id);
@@ -1477,11 +1762,13 @@
   function renderAll() {
     renderHeader();
     renderMeta();
+    renderBatch();
     renderList();
     renderDetail();
     renderAi();
     renderVideoBar();
     renderMarkers();
+    renderResult();
     updateButtons();
     updateZoom();
     draw();
@@ -1494,7 +1781,10 @@
     if (!m) {
       els.frame.textContent = '—';
     } else if (m.kind === 'image') {
-      els.frame.textContent = '单幅';
+      const idx = S.images.findIndex(r => r.id === S.activeImageId);
+      els.frame.textContent = m.batch && idx >= 0
+        ? (idx + 1) + ' / ' + S.images.length + ' 幅'
+        : '单幅';
     } else {
       els.frame.textContent = '#' + currentFrameIndex() + ' · ' + timeStr(currentTimeMs());
     }
@@ -1516,8 +1806,12 @@
       ['状态', '已载入'],
       ['类型', m.kind === 'image' ? '图片' : '视频'],
       ['尺寸', m.width + ' × ' + m.height],
-      ['来源', m.demo ? '示例素材' : '本地文件']
+      ['来源', m.batch ? '批次图片' : (m.demo ? '示例素材' : '本地文件')]
     ];
+    if (m.kind === 'image' && m.batch) {
+      const idx = S.images.findIndex(r => r.id === S.activeImageId);
+      if (idx >= 0) rows.push(['批次', (idx + 1) + ' / ' + S.images.length]);
+    }
     if (m.kind === 'video') {
       rows.push(['时长', timeStr(m.duration)]);
       rows.push(['帧率', m.fps + ' fps']);
@@ -1525,6 +1819,36 @@
     els.meta.innerHTML = rows.map(([k, v]) =>
       '<dt>' + k + '</dt><dd' + (k === '尺寸' || k === '时长' ? ' class="mono"' : '') + '>' + esc(v) + '</dd>'
     ).join('');
+  }
+
+  function renderBatch() {
+    const visible = S.images.length > 0 && (S.batchMode || S.images.length > 1);
+    els.batchSec.classList.toggle('hidden', !visible);
+    els.batchCount.textContent = String(S.images.length);
+    if (!visible) return;
+
+    const keepScroll = els.batchList.scrollTop;
+    els.batchList.innerHTML = S.images.map((rec, i) => {
+      const active = rec.id === S.activeImageId;
+      const hits = imageHitCount(rec) + rec.annotations.length;
+      const state = rec.detections.has(0) || rec.annotations.length
+        ? (hits ? hits + ' 框' : '0 框')
+        : '未检测';
+      return '<div class="dt-batch-item' + (active ? ' on' : '') + '" data-id="' + esc(rec.id) +
+        '" role="button" tabindex="0" title="' + esc(rec.name) + '">' +
+        '<img src="' + esc(rec.url) + '" alt="" loading="lazy">' +
+        '<span class="dt-batch-main"><b>' + esc(rec.name) + '</b><small>' +
+        rec.width + ' × ' + rec.height + ' · ' + state + '</small></span>' +
+        '<span class="dt-batch-index">' + (i + 1) + '</span>' +
+        '<button class="dt-batch-remove" type="button" data-remove="' + esc(rec.id) + '" title="从批次移除">×</button>' +
+        '</div>';
+    }).join('');
+    els.batchList.scrollTop = keepScroll;
+    els.batchAll.disabled = S.batchRunning || !!S.busy || !S.images.length;
+    els.batchClear.disabled = S.batchRunning || !S.images.length;
+    els.batchAll.textContent = S.batchRunning
+      ? '检测 ' + (S.batchProgress || '…')
+      : '批量检测';
   }
 
   function renderList() {
@@ -1579,7 +1903,7 @@
       }
       els.detail.innerHTML = '<div class="dt-detail-empty">' +
         '<b>未选择目标</b><br>' +
-        '在画布或左侧列表选择一个框，查看四角坐标、中心、尺寸与面积。<br><br>' +
+        '在画布或列表中选择一个框，查看四角坐标、中心、尺寸与面积。<br><br>' +
         extra + '</div>';
       return;
     }
@@ -1652,7 +1976,7 @@
       '<button class="btn sm danger" data-act="delete">删除</button>' +
       '</div>' +
       '<div class="dt-sub">几何量</div>' +
-      '<dl class="dt-kv">' +
+      '<dl class="dt-kv dt-geo">' +
       '<dt>中心</dt><dd>' + fmt(center[0], 1) + ', ' + fmt(center[1], 1) + '</dd>' +
       '<dt>尺寸</dt><dd>' + fmt(size[0], 1) + ' × ' + fmt(size[1], 1) + ' px</dd>' +
       (angle != null ? '<dt>角度</dt><dd>' + fmt(angle, 1) + '°</dd>' : '') +
@@ -1687,9 +2011,11 @@
     if (ai.status === 'preview') {
       const cards = ai.candidates.map((c, i) => {
         const bb = c.polygon && c.polygon.length ? window.GEOM.bbox(c.polygon) : [0, 0, 0, 0];
+        const q = Number(c.quality);
+        const qClass = q >= 0.8 ? 'q-high' : (q >= 0.6 ? 'q-mid' : 'q-low');
         return '<div class="dt-cand' + (i === ai.active ? ' on' : '') + '" data-ai-act="pick" data-i="' + i + '">' +
           '<div class="t"><b>候选 ' + (i + 1) + '</b>' +
-          '<span class="tag ai">质量 ' + fmt(c.quality, 2) + '</span></div>' +
+          '<span class="tag ' + qClass + '">质量 ' + fmt(c.quality, 2) + '</span></div>' +
           '<div class="meta">' + c.polygon.length + ' 点 · 中心 ' +
           fmt((bb[0] + bb[2]) / 2, 1) + ', ' + fmt((bb[1] + bb[3]) / 2, 1) +
           ' · ' + fmt(bb[2] - bb[0], 1) + ' × ' + fmt(bb[3] - bb[1], 1) + ' px</div>' +
@@ -1752,6 +2078,7 @@
     if (!S.seekDragging) els.seek.value = String(Math.round(currentTimeMs()));
     els.time.textContent = timeStr(currentTimeMs()) + ' / ' + timeStr(S.media.duration);
     els.play.textContent = mediaVideo.paused ? '播放' : '暂停';
+    if (S.result.open) els.resultPlay.textContent = mediaVideo.paused ? '播放' : '暂停';
     if (document.activeElement !== els.fps) els.fps.value = String(S.media.fps || 30);
     els.auto.classList.toggle('on', S.auto);
     els.autoState.textContent = S.auto
@@ -1784,19 +2111,149 @@
     els.markers.innerHTML = parts.join('');
   }
 
+  function detectedFrameKeys() {
+    let n = 0;
+    for (const arr of S.detections.values()) if (arr.length) n++;
+    return n;
+  }
+
+  function openResult() {
+    if (!S.media || S.media.kind !== 'video' || !S.detections.size) return;
+    S.result.open = true;
+    els.result.classList.remove('hidden');
+    renderResult();
+    requestAnimationFrame(drawResultFrame);
+  }
+
+  function closeResult() {
+    S.result.open = false;
+    els.result.classList.add('hidden');
+  }
+
+  function renderResult() {
+    if (!S.result.open) return;
+    if (!S.media || S.media.kind !== 'video' || !S.detections.size) {
+      closeResult();
+      return;
+    }
+    const idx = currentFrameIndex();
+    const exact = S.detections.has(idx);
+    let heldFrame = null;
+    if (!exact && S.show.hold) {
+      for (const key of S.detections.keys()) {
+        if (key <= idx && (heldFrame === null || key > heldFrame)) heldFrame = key;
+      }
+    }
+    const hits = displayItems().length;
+    els.resultFrame.textContent = '#' + idx;
+    els.resultTime.textContent = timeStr(currentTimeMs());
+    els.resultHits.textContent = String(hits);
+    els.resultKeys.textContent = String(detectedFrameKeys());
+    els.resultState.textContent = detectedFrameKeys() + ' 帧';
+    els.resultPlay.textContent = mediaVideo.paused ? '播放' : '暂停';
+    if (exact) {
+      const arr = S.detections.get(idx) || [];
+      els.resultHold.textContent = arr.length ? '本帧结果' : '本帧 0 框';
+      els.resultHold.classList.toggle('held', !arr.length);
+    } else if (heldFrame !== null) {
+      els.resultHold.textContent = '沿用 #' + heldFrame;
+      els.resultHold.classList.add('held');
+    } else {
+      els.resultHold.textContent = '无结果';
+      els.resultHold.classList.add('held');
+    }
+    drawResultFrame();
+  }
+
+  function drawResultFrame() {
+    if (!S.result.open || !els.resultCanvas) return;
+    const c = els.resultCanvas;
+    const wrap = c.parentElement;
+    if (!wrap) return;
+    const r = wrap.getBoundingClientRect();
+    if (!r.width || !r.height) return;
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    const w = Math.round(r.width);
+    const h = Math.round(r.height);
+    if (c.width !== Math.round(w * dpr) || c.height !== Math.round(h * dpr)) {
+      c.width = Math.round(w * dpr);
+      c.height = Math.round(h * dpr);
+    }
+    const g = c.getContext('2d');
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    g.clearRect(0, 0, w, h);
+    g.fillStyle = '#050d16';
+    g.fillRect(0, 0, w, h);
+    if (!S.media || S.media.kind !== 'video' || mediaVideo.readyState < 2) return;
+
+    const m = S.media;
+    const s = Math.min(w / m.width, h / m.height);
+    const ox = (w - m.width * s) / 2;
+    const oy = (h - m.height * s) / 2;
+    g.imageSmoothingEnabled = true;
+    g.imageSmoothingQuality = 'high';
+    try { g.drawImage(mediaVideo, ox, oy, m.width * s, m.height * s); } catch (_) { return; }
+
+    const items = displayItems();
+    for (const item of items) {
+      if (!item.polygon || item.polygon.length < 3) continue;
+      const color = itemColor(item);
+      g.beginPath();
+      item.polygon.forEach((p, i) => {
+        const x = ox + p[0] * s;
+        const y = oy + p[1] * s;
+        if (i === 0) g.moveTo(x, y); else g.lineTo(x, y);
+      });
+      g.closePath();
+      g.globalAlpha = 0.1;
+      g.fillStyle = color;
+      g.fill();
+      g.globalAlpha = 1;
+      g.strokeStyle = color;
+      g.lineWidth = 1.6;
+      g.setLineDash(item.held ? [5, 4] : []);
+      g.stroke();
+      g.setLineDash([]);
+      if (S.show.labels) {
+        const bb = window.GEOM.bbox(item.polygon);
+        const tx = ox + bb[0] * s;
+        const ty = oy + bb[1] * s;
+        const label = '#' + item.id;
+        g.font = '600 10px "Cascadia Mono", Consolas, monospace';
+        const tw = g.measureText(label).width;
+        g.fillStyle = 'rgba(5,15,25,.86)';
+        g.fillRect(tx, Math.max(0, ty - 14), tw + 8, 13);
+        g.fillStyle = color;
+        g.fillText(label, tx + 4, Math.max(9, ty - 4));
+      }
+    }
+    g.strokeStyle = 'rgba(107,159,196,.2)';
+    g.lineWidth = 1;
+    g.strokeRect(ox + 0.5, oy + 0.5, m.width * s - 1, m.height * s - 1);
+    if (!items.length) {
+      g.fillStyle = 'rgba(169,191,208,.7)';
+      g.font = '12px "Segoe UI", "Microsoft YaHei", sans-serif';
+      g.textAlign = 'center';
+      g.fillText('本帧没有检测框', w / 2, h / 2);
+      g.textAlign = 'start';
+    }
+  }
+
   function updateButtons() {
     const has = !!S.media;
     const busy = !!S.busy;
     const isVideo = has && S.media.kind === 'video';
-    els.detect.disabled = !has || busy;
-    els.auto.disabled = !has || !isVideo;
-    els.clear.disabled = !has;
+    els.detect.disabled = !has || busy || S.batchRunning;
+    els.auto.disabled = !has || !isVideo || S.batchRunning;
+    els.clear.disabled = !has || S.batchRunning;
     els.fit.disabled = !has;
     els.one.disabled = !has;
     els.labels.disabled = !has;
     els.coords.disabled = !has;
     els.hold.disabled = !isVideo;
     els.export.disabled = !has || (!S.annotations.length && !S.detections.size);
+    els.batchAll.disabled = !S.images.length || S.batchRunning || busy;
+    els.batchClear.disabled = !S.images.length || S.batchRunning;
     els.labels.classList.toggle('on', S.show.labels);
     els.coords.classList.toggle('on', S.show.coords);
     els.hold.classList.toggle('on', S.show.hold);
@@ -1816,13 +2273,20 @@
   /* ------------------------------------------------------------------ video controls */
 
   function bindVideo() {
-    mediaVideo.addEventListener('play', () => { els.play.textContent = '暂停'; });
-    mediaVideo.addEventListener('pause', () => { els.play.textContent = '播放'; });
+    mediaVideo.addEventListener('play', () => {
+      els.play.textContent = '暂停';
+      if (S.result.open) els.resultPlay.textContent = '暂停';
+    });
+    mediaVideo.addEventListener('pause', () => {
+      els.play.textContent = '播放';
+      if (S.result.open) els.resultPlay.textContent = '播放';
+    });
     mediaVideo.addEventListener('seeked', () => {
       renderHeader();
       renderList();
       renderDetail();
       renderVideoBar();
+      renderResult();
       draw();
     });
     mediaVideo.addEventListener('timeupdate', () => {
@@ -1838,6 +2302,10 @@
     els.play.onclick = togglePlay;
     els.prev.onclick = () => stepFrame(-1);
     els.next.onclick = () => stepFrame(1);
+    els.resultPlay.onclick = togglePlay;
+    els.resultPrev.onclick = () => stepFrame(-1);
+    els.resultNext.onclick = () => stepFrame(1);
+    els.resultClose.onclick = closeResult;
     els.seek.addEventListener('input', () => {
       if (!S.media || S.media.kind !== 'video') return;
       S.seekDragging = true;
@@ -1918,6 +2386,7 @@
         }
         // 候选绑定的是请求时的帧，换帧后必须丢弃，避免把旧轮廓画到新画面上
         if (S.ai.status === 'preview' || S.ai.status === 'error') clearAi();
+        if (S.result.open) renderResult();
       }
       if (!mediaVideo.paused) {
         draw();
@@ -1947,16 +2416,51 @@
 
   function bindMedia() {
     els.pick.onclick = () => els.file.click();
+    els.pickFolder.onclick = () => els.folder.click();
     els.file.onchange = () => {
-      const f = els.file.files && els.file.files[0];
+      const files = Array.from(els.file.files || []);
       els.file.value = '';
-      if (f) handleFile(f);
+      if (files.length) handleFiles(files);
+    };
+    els.folder.onchange = () => {
+      const files = Array.from(els.folder.files || []);
+      els.folder.value = '';
+      if (files.length) handleFiles(files, { folder: true });
     };
     els.demoImg.onclick = () => {
       loadImageSource('assets/harbor.png', 'harbor.png', { demo: true })
         .catch(err => toast(err.message, 'err'));
     };
     els.demoVideo.onclick = makeDemoVideo;
+
+    els.batchList.addEventListener('click', ev => {
+      const remove = ev.target.closest('[data-remove]');
+      if (remove) {
+        ev.stopPropagation();
+        removeImageRecord(remove.dataset.remove);
+        return;
+      }
+      const item = ev.target.closest('.dt-batch-item');
+      if (!item) return;
+      if (S.batchRunning) {
+        toast('批量检测进行中，请稍候', 'err');
+        return;
+      }
+      if (S.busy) return;
+      const rec = S.images.find(r => r.id === item.dataset.id);
+      if (rec && rec.id !== S.activeImageId) activateImageRecord(rec, { createSession: false });
+    });
+    els.batchList.addEventListener('keydown', ev => {
+      if (ev.key !== 'Enter' && ev.key !== ' ') return;
+      if (ev.target.closest('.dt-batch-remove')) return;
+      const item = ev.target.closest('.dt-batch-item');
+      if (!item) return;
+      ev.preventDefault();
+      const rec = S.images.find(r => r.id === item.dataset.id);
+      if (rec && !S.batchRunning && !S.busy) activateImageRecord(rec, { createSession: false });
+    });
+    els.batchAll.onclick = runBatchDetection;
+    els.batchClear.onclick = clearBatch;
 
     const stop = ev => { ev.preventDefault(); ev.stopPropagation(); };
     [els.drop, els.stage].forEach(el => {
@@ -1973,31 +2477,54 @@
         stop(ev);
         el.classList.remove('hot');
         el.classList.remove('dragover');
-        const f = ev.dataTransfer && ev.dataTransfer.files && ev.dataTransfer.files[0];
-        if (f) handleFile(f);
+        const files = ev.dataTransfer && ev.dataTransfer.files;
+        if (files && files.length) handleFiles(files);
       });
     });
   }
 
-  async function handleFile(file) {
-    const isVideo = /^video\//.test(file.type) || /\.(mp4|webm|mov|m4v|ogv)$/i.test(file.name);
-    const isImage = /^image\//.test(file.type) || /\.(png|jpe?g|webp|bmp)$/i.test(file.name);
-    if (!isImage && !isVideo) {
+  async function handleFiles(fileList, opts) {
+    opts = opts || {};
+    if (S.batchRunning) {
+      toast('批量检测进行中，请稍候再导入', 'err');
+      return;
+    }
+    const files = Array.from(fileList || []);
+    if (!files.length) return;
+    const images = files.filter(isImageFile);
+    const videos = files.filter(isVideoFile);
+    if (!images.length && !videos.length) {
       toast('仅支持图片或视频文件', 'err');
       return;
     }
-    if (file.size > 300 * 1024 * 1024) {
-      toast('文件超过 300 MB，请先压缩或裁切', 'err');
+    const tooBig = images.filter(f => f.size > 40 * 1024 * 1024);
+    if (tooBig.length) {
+      toast(tooBig.length + ' 张图片超过 40 MB，已跳过', 'err');
+    }
+    const usableImages = images.filter(f => f.size <= 40 * 1024 * 1024);
+
+    if (videos.length) {
+      if (videos.length > 1) toast('一次载入一个视频，其余视频已忽略');
+      if (usableImages.length) {
+        await addImageFiles(usableImages, { activate: false, folder: !!opts.folder });
+      }
+      const file = videos[0];
+      if (file.size > 300 * 1024 * 1024) {
+        toast('视频超过 300 MB，请先压缩或裁切', 'err');
+        return;
+      }
+      const url = URL.createObjectURL(file);
+      try {
+        await loadVideoSource(url, file.name, { owned: true });
+      } catch (err) {
+        URL.revokeObjectURL(url);
+        toast(err.message, 'err');
+      }
       return;
     }
-    const url = URL.createObjectURL(file);
-    try {
-      if (isVideo) await loadVideoSource(url, file.name, { owned: true });
-      else await loadImageSource(url, file.name, { owned: true });
-    } catch (err) {
-      URL.revokeObjectURL(url);
-      toast(err.message, 'err');
-    }
+
+    if (!usableImages.length) return;
+    await addImageFiles(usableImages, { activate: true, folder: !!opts.folder });
   }
 
   function bindTools() {
@@ -2022,6 +2549,7 @@
       updateButtons();
       renderList();
       renderDetail();
+      if (S.result.open) renderResult();
       draw();
     };
     els.detect.onclick = () => runDetection();
@@ -2315,6 +2843,10 @@
 
   async function makeDemoVideo() {
     if (S.busy) return;
+    if (S.batchRunning) {
+      toast('批量检测进行中，请稍候再生成视频', 'err');
+      return;
+    }
     if (!window.MediaRecorder || !HTMLCanvasElement.prototype.captureStream) {
       toast('当前浏览器不支持合成演示视频，请上传本地视频', 'err');
       return;
