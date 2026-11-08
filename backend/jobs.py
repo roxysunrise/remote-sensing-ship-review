@@ -7,15 +7,20 @@
 from __future__ import annotations
 
 import json
+import logging
 import queue
+import sqlite3
 import threading
 import traceback
 from pathlib import Path
 
 from algorithm.errors import DetectionError
+from algorithm.ship_detector import canonical_polygon
 from algorithm.tiled_inference import plan_tiles
 
 from . import config, db, detector, errors, storage
+
+log = logging.getLogger(__name__)
 
 TERMINAL = {"done", "failed", "cancelled"}
 
@@ -35,6 +40,7 @@ class TaskRuntime:
             if self._started:
                 return
             self._recover_interrupted()
+            self._recover_missing_versions()
             for index in range(self._worker_count):
                 thread = threading.Thread(target=self._loop, name=f"task-worker-{index}", daemon=True)
                 thread.start()
@@ -47,6 +53,24 @@ class TaskRuntime:
         db.execute("UPDATE tasks SET status='failed', error=?, finished_at=?"
                    " WHERE status IN ('queued','running','merging')",
                    ("SERVER_RESTART: 服务重启导致任务中断，请重试", db.now()))
+
+    def _recover_missing_versions(self) -> None:
+        """恢复旧 Worker 已发布结果但来不及创建的基线版本。"""
+        rows = db.query(
+            "SELECT t.id, t.attempt, t.result_path, t.final_count, t.image_id, t.project_id,"
+            " i.sha256, i.width, i.height FROM tasks t JOIN images i"
+            " ON i.id=t.image_id AND i.project_id=t.project_id"
+            " WHERE t.status='done' AND t.result_path IS NOT NULL AND NOT EXISTS"
+            " (SELECT 1 FROM versions v WHERE v.task_id=t.id AND v.label='v0')"
+        )
+        for row in rows:
+            try:
+                payload = _read_legacy_result(row)
+            except (DetectionError, OSError, ValueError, TypeError, KeyError, RuntimeError, OverflowError):
+                log.warning("任务 %s 的历史结果不可验证，跳过 v0 恢复", row["id"])
+                continue
+            with db.tx() as conn:
+                self._ensure_v0(conn, row["id"], payload)
 
     def submit(self, task_id: str) -> None:
         self.start()
@@ -130,12 +154,16 @@ class TaskRuntime:
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
-        db.execute(
-            "UPDATE tasks SET status='done', final_count=?, temp_count=?, result_path=?,"
-            " finished_at=? WHERE id=? AND attempt=?",
-            (payload["count"], payload["count"], str(target), db.now(), task_id, attempt),
-        )
-        self._ensure_v0(task_id, payload, actor=row["created_by"])
+        # 状态与 v0 同时提交，避免重启后留下可读结果却无基线版本的任务。
+        with db.tx() as conn:
+            updated = conn.execute(
+                "UPDATE tasks SET status='done', final_count=?, temp_count=?, result_path=?,"
+                " finished_at=? WHERE id=? AND attempt=?",
+                (payload["count"], payload["count"], str(target), db.now(), task_id, attempt),
+            )
+            if not updated.rowcount:
+                return
+            self._ensure_v0(conn, task_id, payload)
         # 旧 attempt 的结果文件可重算，不必长期占用磁盘
         for stale in config.RESULT_DIR.glob(f"{task_id}_a*.json"):
             if not stale.name.endswith(f"_a{attempt}.json"):
@@ -165,9 +193,8 @@ class TaskRuntime:
         payload["image"] = merged
         return payload
 
-    def _ensure_v0(self, task_id: str, payload: dict, *, actor: str) -> None:
-        if db.one("SELECT label FROM versions WHERE task_id=? AND label='v0'", (task_id,)):
-            return
+    @staticmethod
+    def _ensure_v0(conn: sqlite3.Connection, task_id: str, payload: dict) -> None:
         detections = payload["detections"]
         counts = {
             "total": len(detections),
@@ -177,7 +204,7 @@ class TaskRuntime:
             "deleted": sum(1 for d in detections if d.get("review_state") == "deleted"),
             "added": 0,
         }
-        db.execute(
+        conn.execute(
             "INSERT OR IGNORE INTO versions(task_id,label,project_id,author,created_at,readonly,"
             "summary,counts,detections) VALUES(?,?,?,?,?,?,?,?,?)",
             (task_id, "v0", payload["image"]["project_id"], "model", db.now(), 1,
@@ -207,6 +234,51 @@ class TaskRuntime:
         db.log_event("task.failed", project_id=row["project_id"] if row else None,
                      user_id=row["created_by"] if row else None,
                      target=task_id, detail={"code": code, "message": message})
+
+
+def _read_legacy_result(row: sqlite3.Row) -> dict:
+    path = Path(row["result_path"]).resolve()
+    expected = storage.result_path(row["id"], row["attempt"]).resolve()
+    if path != expected or path.parent != config.RESULT_DIR.resolve():
+        raise ValueError("result path")
+    with path.open("rb") as source:
+        limit = 32 << 20  # 上限远高于 20,000 个候选和 4,096 个切片的正常结果。
+        data = source.read(limit + 1)
+    if len(data) > limit:
+        raise ValueError("result size")
+    payload = json.loads(data)
+    if payload["schema_version"] not in {"ship-detection/0.1", "ship-detection/0.2"}:
+        raise ValueError("result schema")
+    image = payload["image"]
+    if any(image[key] != row[column] for key, column in (
+        ("id", "image_id"), ("project_id", "project_id"), ("sha256", "sha256"),
+        ("width", "width"), ("height", "height"),
+    )):
+        raise ValueError("result image")
+    detections = payload["detections"]
+    count = payload["count"]
+    if (not isinstance(detections, list) or type(count) is not int
+            or count != row["final_count"] or count != len(detections)):
+        raise ValueError("result count")
+    for index, detection in enumerate(detections, start=1):
+        if type(detection["id"]) is not int or detection["id"] != index:
+            raise ValueError("result detection id")
+        polygon = detection["polygon"]
+        if not isinstance(polygon, list) or len(polygon) != 4 or any(
+            not isinstance(point, list) or len(point) != 2
+            or any(type(value) not in (int, float) for value in point)
+            for point in polygon
+        ) or canonical_polygon(polygon) != polygon:
+            raise ValueError("result detection polygon")
+        if (type(detection["class_id"]) is not int or not isinstance(detection["class_name"], str)
+                or type(detection["confidence"]) not in (int, float)
+                or not 0 <= detection["confidence"] <= 1
+                or detection.get("review_state", "pending") != "pending"
+                or detection.get("origin", "model") != "model"
+                or (detection.get("source_tile_id") is not None and type(detection["source_tile_id"]) is not int)
+                or (detection.get("note") is not None and not isinstance(detection["note"], str))):
+            raise ValueError("result detection metadata")
+    return payload
 
 
 def _model_detection(det: dict) -> dict:
