@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>影像检测与标注工作台 · 图片 / 视频 / AI 辅助</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23a274ff'/%3E%3Cpath d='M7 21h18l-3 5H10z' fill='%230a0f14'/%3E%3Crect x='14' y='7' width='4' height='11' fill='%230a0f14'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="styles.css?v=2">
+<link rel="stylesheet" href="detect.css?v=2">
+</head>
+<body>
+
+<div class="dt-app">
+
+  <header class="dt-top">
+    <a class="dt-brand" href="index.html" title="返回主工作台">
+      <span class="mark">检</span>
+      <span>
+        影像检测与标注
+        <small>image / video · AI-assisted annotation</small>
+      </span>
+    </a>
+
+    <div class="dt-chips">
+      <span class="chip">媒体 <b id="dt-media">未载入</b></span>
+      <span class="chip">分辨率 <b id="dt-res">—</b></span>
+      <span class="chip">帧 <b id="dt-frame">—</b></span>
+      <span class="chip" title="mock：浏览器内启发式；http：真实推理服务">接口 <b id="dt-api">mock</b></span>
+    </div>
+
+    <div class="dt-top-right">
+      <span class="badge ai" id="dt-mode-badge">接口已预留</span>
+      <a class="btn sm ghost" href="index.html">主工作台</a>
+    </div>
+  </header>
+
+  <div class="dt-shell">
+
+    <!-- ================= 左：媒体与目标 ================= -->
+    <aside class="dt-side left">
+      <section class="dt-sec">
+        <div class="dt-sec-h">媒体源</div>
+        <div class="dt-drop" id="dt-drop">
+          <div class="big">拖入图片或视频</div>
+          <div class="muted">PNG / JPEG · WebM / MP4</div>
+          <div class="dt-drop-actions">
+            <button class="btn sm" id="dt-pick" type="button">选择文件</button>
+            <button class="btn sm" id="dt-demo-img" type="button">示例图片</button>
+            <button class="btn sm" id="dt-demo-video" type="button">生成演示视频</button>
+          </div>
+          <input type="file" id="dt-file" accept="image/png,image/jpeg,image/webp,video/mp4,video/webm,video/quicktime" hidden>
+        </div>
+        <dl class="dt-meta" id="dt-meta">
+          <dt>状态</dt><dd class="dim">等待载入</dd>
+        </dl>
+      </section>
+
+      <section class="dt-sec grow">
+        <div class="dt-sec-h">
+          <span>目标列表</span>
+          <span class="mono dim" id="dt-count">0</span>
+          <div class="spacer"></div>
+          <div class="dt-tabs" id="dt-tabs">
+            <button class="on" data-f="all">全部</button>
+            <button data-f="model">模型</button>
+            <button data-f="ai">AI</button>
+            <button data-f="manual">手工</button>
+          </div>
+        </div>
+        <div class="dt-list" id="dt-list"></div>
+        <div class="dt-list-foot">
+          <button class="btn sm ghost" id="dt-export" disabled>导出标注 JSON</button>
+        </div>
+      </section>
+    </aside>
+
+    <!-- ================= 中：画布 ================= -->
+    <main class="dt-main">
+      <div class="dt-bar">
+        <div class="tool-group" id="dt-tools">
+          <button class="tool on" data-tool="select" title="选择 / 移动 / 编辑顶点">选择</button>
+          <button class="tool" data-tool="box" title="拖动创建旋转框">画框</button>
+          <button class="tool" data-tool="polygon" title="逐点单击，双击或 Enter 闭合">多边形</button>
+          <button class="tool" data-tool="ai" title="在目标周围拖一个粗框，交给 AI 细化">AI 辅助</button>
+          <button class="tool" data-tool="pan" title="拖动画布">平移</button>
+        </div>
+        <div class="sep"></div>
+        <button class="btn sm primary" id="dt-detect" disabled>检测当前帧</button>
+        <button class="btn sm" id="dt-auto" disabled title="播放时按固定间隔抽帧检测">连续检测</button>
+        <button class="btn sm" id="dt-clear" disabled>清除本帧结果</button>
+        <div class="sep"></div>
+        <button class="btn sm" id="dt-fit" disabled>适应</button>
+        <button class="btn sm" id="dt-one" disabled>1:1</button>
+        <div class="spacer"></div>
+        <button class="btn sm" id="dt-labels" disabled title="在框上显示编号与置信度">编号</button>
+        <button class="btn sm" id="dt-coords" disabled title="在框上显示包围盒坐标">坐标标签</button>
+        <button class="btn sm on" id="dt-hold" disabled title="视频没有当前帧结果时，沿用最近一次结果">沿用上一帧</button>
+      </div>
+
+      <div class="dt-stage" id="dt-stage">
+        <canvas id="dt-canvas"></canvas>
+        <video id="dt-video" muted playsinline preload="auto"></video>
+
+        <div class="dt-hud tl"><span id="dt-cursor" class="mono">x — · y —</span></div>
+        <div class="dt-hud tr"><span id="dt-zoom" class="mono">—</span></div>
+        <div class="dt-hud bl" id="dt-hint">滚轮缩放 · 空格 / 右键拖动平移</div>
+        <div class="dt-hud br"><span id="dt-drawinfo" class="mono"></span></div>
+
+        <div class="dt-busy hidden" id="dt-busy"><span class="spinner"></span><span id="dt-busy-text">检测中…</span></div>
+
+        <div class="dt-empty" id="dt-empty">
+          <div class="dt-empty-ico">▦</div>
+          <div>拖入图片或视频，或从左侧选择示例</div>
+          <div class="dim">图片逐幅检测；视频按帧检测，结果绑定时间戳</div>
+        </div>
+      </div>
+
+      <div class="dt-vbar hidden" id="dt-vbar">
+        <button class="btn sm" id="dt-play" title="播放 / 暂停">播放</button>
+        <button class="btn sm" id="dt-prev" title="上一帧">◀|</button>
+        <button class="btn sm" id="dt-next" title="下一帧">|▶</button>
+        <span class="mono dt-time" id="dt-time">00:00.000 / 00:00.000</span>
+        <div class="dt-timeline">
+          <input type="range" id="dt-seek" min="0" max="1000" value="0" step="1" aria-label="视频进度">
+          <div class="dt-markers" id="dt-markers"></div>
+        </div>
+        <select id="dt-speed" title="播放速度">
+          <option value="0.25">0.25×</option>
+          <option value="0.5">0.5×</option>
+          <option value="1" selected>1×</option>
+          <option value="2">2×</option>
+        </select>
+        <label class="dt-fps" title="用于帧号与逐帧步进；浏览器无法读取真实帧率">FPS
+          <input type="number" id="dt-fps" min="1" max="120" step="1" value="30">
+        </label>
+        <span class="tag" id="dt-auto-state">连续检测关闭</span>
+      </div>
+    </main>
+
+    <!-- ================= 右：坐标与 AI ================= -->
+    <aside class="dt-side right">
+      <section class="dt-sec grow">
+        <div class="dt-sec-h">
+          <span>坐标 / 属性</span>
+          <div class="spacer"></div>
+          <span class="tag hidden" id="dt-sel-tag">已选</span>
+        </div>
+        <div class="dt-detail" id="dt-detail"></div>
+      </section>
+
+      <section class="dt-sec dt-ai-sec">
+        <div class="dt-sec-h">
+          <span>AI 辅助框选</span>
+          <span class="tag ai">可接入</span>
+          <div class="spacer"></div>
+          <span class="mono dim" id="dt-ai-mode">mock</span>
+        </div>
+        <div class="dt-ai" id="dt-ai"></div>
+      </section>
+    </aside>
+
+  </div>
+</div>
+
+<div class="toast-host" id="dt-toasts"></div>
+
+<script src="detect-config.js?v=1"></script>
+<script src="api/geom.js"></script>
+<script src="api/detect-mock.js?v=1"></script>
+<script src="api/detect-api.js?v=1"></script>
+<script src="detect.js?v=1"></script>
+</body>
+</html>

@@ -1,0 +1,491 @@
+openapi: 3.0.3
+info:
+  title: 影像检测与 AI 辅助分割 API
+  version: 0.1.0
+  description: |
+    检测工作台（detect.html）的推理接口契约。
+
+    坐标统一为原始媒体像素：原点左上，x 向右、y 向下；
+    多边形顺时针，起点为最小 (y, x) 顶点。服务端返回的 polygon
+    必须是原始分辨率坐标，不是下采样负载坐标。
+
+servers:
+  - url: http://127.0.0.1:8000/api/v1
+    description: 本地开发
+
+tags:
+  - name: vision
+    description: 图片 / 视频帧检测与分割
+
+paths:
+  /vision/capabilities:
+    get:
+      tags: [vision]
+      summary: 读取服务能力与模型信息
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Capabilities'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /vision/sessions:
+    post:
+      tags: [vision]
+      summary: 为当前媒体创建推理会话
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SessionRequest'
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /vision/detect:
+    post:
+      tags: [vision]
+      summary: 检测一帧（图片或视频当前帧）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DetectRequest'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DetectResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '413':
+          description: 帧过大
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          description: 连续检测触发限流
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /vision/segment:
+    post:
+      tags: [vision]
+      summary: AI 辅助分割，返回候选轮廓
+      description: |
+        roi 或 point 二选一。返回的候选必须经人工采纳，
+        confidence 固定为 null，quality 仅表示候选质量。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SegmentRequest'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SegmentResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '422':
+          description: 区域无效或没有候选
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /vision/jobs/{job_id}/cancel:
+    post:
+      tags: [vision]
+      summary: 取消异步推理任务（预留）
+      parameters:
+        - name: job_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CancelResponse'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  responses:
+    Unauthorized:
+      description: 未登录或 token 失效
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    BadRequest:
+      description: 请求无效
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              example: NO_CANDIDATE
+            message:
+              type: string
+              example: 该区域没有可用候选
+            details:
+              type: object
+              additionalProperties: true
+
+    Capabilities:
+      type: object
+      properties:
+        service:
+          type: string
+          example: vision-inference
+        version:
+          type: string
+          example: 0.1.0
+        modes:
+          type: array
+          items:
+            type: string
+            enum: [image, video]
+        tasks:
+          type: array
+          items:
+            type: string
+            enum: [detect, segment]
+        models:
+          type: object
+          properties:
+            detect:
+              $ref: '#/components/schemas/ModelInfo'
+            segment:
+              $ref: '#/components/schemas/ModelInfo'
+        limits:
+          type: object
+          properties:
+            max_image_edge:
+              type: integer
+            max_video_duration_s:
+              type: integer
+
+    ModelInfo:
+      type: object
+      properties:
+        name:
+          type: string
+        version:
+          type: string
+        device:
+          type: string
+        note:
+          type: string
+
+    SessionRequest:
+      type: object
+      required: [kind, name, width, height]
+      properties:
+        kind:
+          type: string
+          enum: [image, video]
+        name:
+          type: string
+        width:
+          type: integer
+          minimum: 1
+        height:
+          type: integer
+          minimum: 1
+        duration_ms:
+          type: integer
+          minimum: 0
+        fps:
+          type: number
+          minimum: 1
+
+    SessionResponse:
+      type: object
+      required: [session_id]
+      properties:
+        session_id:
+          type: string
+          example: ses_ab12cd34
+        media_id:
+          type: string
+        kind:
+          type: string
+          enum: [image, video]
+        expires_at:
+          type: string
+          format: date-time
+
+    Frame:
+      type: object
+      required: [index, time_ms, width, height]
+      properties:
+        index:
+          type: integer
+          minimum: 0
+          description: 视频帧号；图片固定为 0
+        time_ms:
+          type: integer
+          minimum: 0
+        width:
+          type: integer
+          description: 原始媒体宽度
+        height:
+          type: integer
+          description: 原始媒体高度
+
+    ImagePayload:
+      type: object
+      required: [data_url, width, height]
+      properties:
+        data_url:
+          type: string
+          description: JPEG data URL；尺寸可能小于 frame，需按比例还原坐标
+        width:
+          type: integer
+        height:
+          type: integer
+
+    DetectRequest:
+      type: object
+      required: [session_id, kind, frame, image]
+      properties:
+        session_id:
+          type: string
+        kind:
+          type: string
+          enum: [image, video]
+        frame:
+          $ref: '#/components/schemas/Frame'
+        image:
+          $ref: '#/components/schemas/ImagePayload'
+        options:
+          type: object
+          properties:
+            mode:
+              type: string
+              enum: [full, roi, point]
+              default: full
+            conf:
+              type: number
+              minimum: 0
+              maximum: 1
+            max_det:
+              type: integer
+              minimum: 1
+            classes:
+              description: 省略、null 或空数组使用全部模型类别。当前 DOTA 权重中 [1] 只检测船舶。
+              oneOf:
+                - type: array
+                  nullable: true
+                  items: { type: integer }
+                - type: string
+                  description: 也接受 all 或逗号分隔的类别 ID。
+              example: [1]
+            prompt:
+              type: string
+
+    Detection:
+      type: object
+      required: [polygon]
+      properties:
+        id:
+          type: string
+        label:
+          type: string
+          example: ship
+        class_id: { type: integer, nullable: true, example: 1 }
+        score:
+          type: number
+          nullable: true
+          minimum: 0
+          maximum: 1
+        polygon:
+          type: array
+          minItems: 3
+          items:
+            type: array
+            minItems: 2
+            maxItems: 2
+            items:
+              type: number
+          description: 原始媒体像素，顺时针，起点 min(y,x)
+        source:
+          type: string
+          enum: [model]
+
+    DetectResponse:
+      type: object
+      required: [request_id, detections]
+      properties:
+        request_id:
+          type: string
+        frame:
+          $ref: '#/components/schemas/Frame'
+        model:
+          allOf:
+            - $ref: '#/components/schemas/ModelInfo'
+            - type: object
+              properties:
+                classes:
+                  type: array
+                  nullable: true
+                  items: { type: integer }
+                  description: 当前有效的模型类别 ID。
+                classes_filtered:
+                  type: boolean
+                  description: 是否显式按类别过滤。
+        elapsed_ms:
+          type: number
+        count:
+          type: integer
+        by_class:
+          type: object
+          description: 按 label 聚合目标数量，空结果返回空对象。
+          additionalProperties: { type: integer, minimum: 0 }
+        detections:
+          type: array
+          items:
+            $ref: '#/components/schemas/Detection'
+        notice:
+          type: string
+
+    SegmentRequest:
+      type: object
+      required: [session_id, kind, frame, image]
+      properties:
+        session_id:
+          type: string
+        kind:
+          type: string
+          enum: [image, video]
+        frame:
+          $ref: '#/components/schemas/Frame'
+        image:
+          $ref: '#/components/schemas/ImagePayload'
+        roi:
+          type: array
+          minItems: 4
+          maxItems: 4
+          items:
+            type: number
+          description: '[x0, y0, x1, y1]，原始像素'
+        point:
+          type: array
+          minItems: 2
+          maxItems: 2
+          items:
+            type: number
+        prompt:
+          type: string
+          example: 船舶
+        mode:
+          type: string
+          enum: [roi, point]
+
+    Candidate:
+      type: object
+      required: [polygon]
+      properties:
+        id:
+          type: string
+        label:
+          type: string
+        quality:
+          type: number
+          minimum: 0
+          maximum: 1
+          description: 候选质量分，不是概率
+        confidence:
+          type: number
+          nullable: true
+          description: 必须为 null；AI 候选不伪造置信度
+          example: null
+        polygon:
+          type: array
+          minItems: 3
+          items:
+            type: array
+            minItems: 2
+            maxItems: 2
+            items:
+              type: number
+        reason:
+          type: string
+
+    SegmentResponse:
+      type: object
+      required: [request_id, candidates]
+      properties:
+        request_id:
+          type: string
+        frame:
+          $ref: '#/components/schemas/Frame'
+        model:
+          $ref: '#/components/schemas/ModelInfo'
+        elapsed_ms:
+          type: number
+        roi:
+          type: array
+          items:
+            type: number
+        candidates:
+          type: array
+          items:
+            $ref: '#/components/schemas/Candidate'
+        notice:
+          type: string
+
+    CancelResponse:
+      type: object
+      properties:
+        cancelled:
+          type: boolean
+
+security:
+  - bearerAuth: []

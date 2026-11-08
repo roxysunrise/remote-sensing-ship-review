@@ -1,0 +1,7 @@
+{
+  "ok": false,
+  "error": {
+    "code": "INPUT_NOT_FOUND",
+    "message": "Image does not exist: datasets\\smoke\\missing.png"
+  }
+}
