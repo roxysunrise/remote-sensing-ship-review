@@ -346,14 +346,17 @@ def main() -> int:
         "options": {"conf": 0.2, "max_det": 100},
     })
     vbody = vision.json() if vision.status_code == 200 else {}
-    inside = True
+    # 允许 1px 容差：贴边目标四舍五入后可能出现 -0.5px（真权重实测），不是缩放错误
+    tol = 1.0
+    overflow = []
     for det in vbody.get("detections", []):
         for x, y in det.get("polygon", []):
-            if not (0 <= x <= frame["width"] and 0 <= y <= frame["height"]):
-                inside = False
+            if not (-tol <= x <= frame["width"] + tol and -tol <= y <= frame["height"] + tol):
+                overflow.append([round(x, 1), round(y, 1)])
+    inside = not overflow
     step("/vision/detect 坐标还原", vision.status_code == 200 and inside,
          f"HTTP {vision.status_code} payload={payload_size} frame={frame['width']}×{frame['height']} "
-         f"count={vbody.get('count')} elapsed_ms={vbody.get('elapsed_ms')} 全部点在帧内={inside}")
+         f"count={vbody.get('count')} elapsed_ms={vbody.get('elapsed_ms')} 越界={len(overflow)}{overflow[:3]}")
 
     caps = client.get(f"{PREFIX}/vision/capabilities").json()
     step("/vision/capabilities", caps.get("loaded") is True,
