@@ -255,6 +255,45 @@ class BackendTests(unittest.TestCase):
                                  headers={"Authorization": f"Bearer {login['token']}"})
         self.assertEqual(denied.status_code, 403)
 
+    def test_create_task_rejects_invalid_parameters(self):
+        """非法检测参数在创建时就 422，不能先入队再让 Worker 把任务跑成 failed。"""
+        self._wait_idle()
+        state = self._upload(_image_bytes((96, 72)), "bad-params.png")
+        cases = [
+            ({"classes": ["1"]}, "classes 非整数"),
+            ({"conf": 2.0}, "conf 超出 (0,1]"),
+            ({"iou": 0}, "iou 为 0"),
+            ({"imgsz": 100}, "imgsz 不是 32 的倍数"),
+            ({"max_det": 0}, "max_det 为 0"),
+        ]
+        for parameters, label in cases:
+            with self.subTest(label=label):
+                response = self.client.post("/projects/harbor-a/tasks", json={
+                    "image_id": state["image_id"], "parameters": parameters,
+                }, headers=self.headers)
+                self.assertEqual(response.status_code, 422, f"{label}: {response.text[:200]}")
+                self.assertEqual(response.json()["error"]["code"], "INVALID_ARGUMENT")
+
+        # 空数组等同全部类别（与 /vision/detect 一致），不再视为错误
+        empty = self.client.post("/projects/harbor-a/tasks", json={
+            "image_id": state["image_id"], "parameters": {"classes": []},
+        }, headers=self.headers)
+        self.assertEqual(empty.status_code, 201, empty.text)
+        self.assertIsNone(empty.json()["parameters"]["classes"], "空数组应归一化为 null")
+        self.client.post(f"/tasks/{empty.json()['id']}/cancel", headers=self.headers)
+        self._wait_idle()
+
+        # 合法参数仍然可以创建，且不会被上面的错误影响
+        ok = self.client.post("/projects/harbor-a/tasks", json={
+            "image_id": state["image_id"],
+            "parameters": {"tiling": True, "tile_size": 128, "stride": 64, "imgsz": 128,
+                           "conf": 0.3, "classes": [1]},
+        }, headers=self.headers)
+        self.assertEqual(ok.status_code, 201, ok.text)
+        self.assertEqual(ok.json()["parameters"]["classes"], [1])
+        # 收尾：取消掉，别占用并发额度影响后续用例
+        self.client.post(f"/tasks/{ok.json()['id']}/cancel", headers=self.headers)
+
     def _wait_idle(self, timeout: float = 180) -> None:
         """等队列清空，避免上一个用例遗留的任务触发并发上限。"""
         deadline = time.time() + timeout
