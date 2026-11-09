@@ -404,3 +404,19 @@ table.tbl tr:hover td { background: rgba(22, 33, 44, .6); }
   color: var(--tx);
 }
 .lib-row .dim { font-size: 11.5px; white-space: nowrap; }
+/* Human annotation workflow */
+#rail [hidden], .wb [hidden] { display: none !important; }
+#annotation-content { padding: 22px; max-width: 1080px; }
+.annotation-row { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; border-top: 1px solid var(--line, #344752); padding: 14px 0; }
+.annotation-row p { margin: 5px 0 0; color: var(--tx-2); }
+.annotation-actions, .annotation-toolbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.annotation-toolbar:not(:empty) { padding: 10px 12px; border-bottom: 1px solid var(--line, #344752); }
+.annotation-toolbar > strong { margin-right: auto; overflow-wrap: anywhere; }
+.annotation-dialog { max-width: min(92vw, 510px); width: 100%; padding: 20px; color: var(--tx, #e9f1f5); background: var(--panel, #172531); border: 1px solid var(--line, #344752); border-radius: 8px; }
+.annotation-dialog::backdrop { background: #0009; }
+.annotation-dialog textarea, .annotation-dialog select { display: block; width: 100%; margin: 8px 0; }
+.annotation-error { color: #ffabab; }
+.annotation-geometry { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 6px; margin: 12px 0; }
+.annotation-geometry input { width: 100%; min-width: 0; }
+.annotation-back { margin: 12px; }
+.annotation-back[hidden] { display: none; }

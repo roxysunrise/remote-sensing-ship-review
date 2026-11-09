@@ -15,6 +15,7 @@ from . import config
 
 _conn: sqlite3.Connection | None = None
 _lock = threading.RLock()
+_atomic = threading.local()
 
 SCHEMA = """
 PRAGMA journal_mode=WAL;
@@ -56,6 +57,13 @@ CREATE TABLE IF NOT EXISTS tasks(
   parameters TEXT NOT NULL, cancel_requested INTEGER NOT NULL DEFAULT 0, error TEXT,
   result_path TEXT, created_at TEXT NOT NULL, started_at TEXT, finished_at TEXT);
 
+CREATE TABLE IF NOT EXISTS annotation_tasks(
+  task_id TEXT PRIMARY KEY REFERENCES tasks(id), project_id TEXT NOT NULL,
+  status TEXT NOT NULL, assignee TEXT, revision INTEGER NOT NULL DEFAULT 0,
+  published_at TEXT NOT NULL, version_id TEXT, reason TEXT, target_id INTEGER
+);
+CREATE UNIQUE INDEX IF NOT EXISTS annotation_one_current ON annotation_tasks(assignee)
+  WHERE status IN ('claimed','active');
 CREATE TABLE IF NOT EXISTS versions(
   task_id TEXT NOT NULL, label TEXT NOT NULL, project_id TEXT NOT NULL, author TEXT NOT NULL,
   created_at TEXT NOT NULL, readonly INTEGER NOT NULL DEFAULT 0, summary TEXT, counts TEXT,
@@ -133,8 +141,33 @@ def execute(sql: str, args: tuple | list = ()) -> int:
     with _lock:
         conn = connection()
         cur = conn.execute(sql, args)
-        conn.commit()
+        if not getattr(_atomic, 'active', False):
+            conn.commit()
         return cur.rowcount
+
+
+@contextlib.contextmanager
+def serialized():
+    # Draft mutation and workflow transitions share the same process-wide writer lock.
+    with _lock:
+        yield
+
+
+@contextlib.contextmanager
+def atomic_write():
+    """Apply a guarded draft mutation and its revision as one SQLite write."""
+    with _lock:
+        conn = connection()
+        conn.execute("BEGIN IMMEDIATE")
+        _atomic.active = True
+        try:
+            yield
+            conn.commit()
+        except BaseException:
+            conn.rollback()
+            raise
+        finally:
+            _atomic.active = False
 
 
 @contextlib.contextmanager
@@ -142,6 +175,9 @@ def tx():
     """短事务：调用方在事务内只做数据库操作，不要在里面跑推理。"""
     with _lock:
         conn = connection()
+        if getattr(_atomic, 'active', False):
+            yield conn
+            return
         try:
             yield conn
             conn.commit()

@@ -76,6 +76,30 @@
       return data;
     }
 
+    const revisions = new Map();
+    const queues = new Map();
+    const failed = new Set();
+    function remember(id, data) {
+      if (Number.isInteger(data?.annotation_revision)) revisions.set(id, data.annotation_revision);
+      return data;
+    }
+    function serialized(id, operation) {
+      const next = (queues.get(id) || Promise.resolve()).then(operation);
+      const tail = next.catch(() => {});
+      queues.set(id, tail);
+      tail.then(() => { if (queues.get(id) === tail) queues.delete(id); });
+      return next;
+    }
+    function write(id, method, path, body) {
+      return serialized(id, async () => {
+        try {
+          return remember(id, await request(method, path, { ...body, revision: revisions.get(id) }));
+        } catch (error) {
+          failed.add(id);
+          throw error;
+        }
+      });
+    }
     return {
       mode: 'http',
       baseUrl: base + prefix,
@@ -119,12 +143,25 @@
       retryTask: id => request('POST', `/tasks/${encodeURIComponent(id)}/retry`, {}),
       getTaskResult: id => request('GET', `/tasks/${encodeURIComponent(id)}/result`),
 
-      getDraft: id => request('GET', `/tasks/${encodeURIComponent(id)}/draft`),
+      listAnnotations: id => request('GET', `/projects/${encodeURIComponent(id)}/annotations`),
+      changeAnnotation: (id, operation, body) => serialized(id, () => {
+        if (['submit','pause','request_release'].includes(operation) && failed.has(id))
+          throw new ApiError(409, 'UNSAVED_DRAFT', '存在保存失败的改动。请核对后重新打开任务再继续。');
+        return request('POST', `/tasks/${encodeURIComponent(id)}/annotation/${operation}`,
+          { ...body, revision: revisions.get(id) });
+      }),
+      hasDraftFailure: id => failed.has(id),
+      confirmHigh: id => write(id, 'POST', `/tasks/${encodeURIComponent(id)}/draft/confirm-high`, {}),
+      getDraft: id => serialized(id, async () => {
+        const data = remember(id, await request('GET', `/tasks/${encodeURIComponent(id)}/draft`));
+        failed.delete(id);
+        return data;
+      }),
       patchDetection: (taskId, detId, patch) =>
-        request('PATCH', `/tasks/${encodeURIComponent(taskId)}/draft/detections/${detId}`, patch),
-      addDetection: (taskId, body) => request('POST', `/tasks/${encodeURIComponent(taskId)}/draft/detections`, body),
+        write(taskId, 'PATCH', `/tasks/${encodeURIComponent(taskId)}/draft/detections/${detId}`, patch),
+      addDetection: (taskId, body) => write(taskId, 'POST', `/tasks/${encodeURIComponent(taskId)}/draft/detections`, body),
       resetDraft: (taskId, versionId) =>
-        request('POST', `/tasks/${encodeURIComponent(taskId)}/draft/reset`, { version_id: versionId }),
+        write(taskId, 'POST', `/tasks/${encodeURIComponent(taskId)}/draft/reset`, { version_id: versionId }),
 
       listVersions: id => request('GET', `/tasks/${encodeURIComponent(id)}/versions`),
       getVersion: (versionId, taskId) =>
@@ -132,16 +169,26 @@
       commitVersion: (taskId, body) => request('POST', `/tasks/${encodeURIComponent(taskId)}/versions`, body || {}),
 
       getReviewQueue: id => request('GET', `/tasks/${encodeURIComponent(id)}/draft/review-queue`),
-      createRegion: (taskId, body) => request('POST', `/tasks/${encodeURIComponent(taskId)}/draft/regions`, body),
+      createRegion: (taskId, body) => write(taskId, 'POST', `/tasks/${encodeURIComponent(taskId)}/draft/regions`, body),
 
       requestAiCandidate: (imageId, body) =>
         request('POST', `/images/${encodeURIComponent(imageId)}/ai-candidates`, body),
-      acceptAiCandidate: id => request('POST', `/ai-candidates/${encodeURIComponent(id)}/accept`, {}),
+      acceptAiCandidate: (id, taskId, replaceId) => taskId
+        ? write(taskId, 'POST', `/ai-candidates/${encodeURIComponent(id)}/accept`, { task_id: taskId, replace_id: replaceId })
+        : request('POST', `/ai-candidates/${encodeURIComponent(id)}/accept`, {}),
       cancelAiCandidate: id => request('POST', `/ai-candidates/${encodeURIComponent(id)}/cancel`, {}),
 
       createExport: (versionId, body, taskId) =>
         request('POST', `/versions/${encodeURIComponent(versionId)}/exports?task_id=${encodeURIComponent(taskId)}`, body || {}),
       getExport: id => request('GET', `/exports/${encodeURIComponent(id)}`),
+      async downloadExport(id, name) {
+        const path = `/exports/${encodeURIComponent(id)}/files/${encodeURIComponent(name)}`;
+        const response = await fetch(base + prefix + path, {
+          headers: { Authorization: 'Bearer ' + token() }, redirect: 'error'
+        });
+        if (!response.ok) throw new ApiError(response.status, 'EXPORT_DOWNLOAD', '无法下载导出文件');
+        return response.blob();
+      },
 
       health: () => request('GET', '/health')
     };
@@ -163,6 +210,7 @@
     const api = { mode: adapter.mode, baseUrl: adapter.baseUrl, config };
     for (const key of Object.keys(adapter)) {
       if (typeof adapter[key] !== 'function') continue;
+      if (key === 'hasDraftFailure') { api[key] = adapter[key]; continue; }
       api[key] = async (...args) => {
         try {
           return await adapter[key](...args);

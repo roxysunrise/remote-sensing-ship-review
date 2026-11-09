@@ -107,6 +107,7 @@ async function action(fn) {
   } catch (err) {
     if (err && err.status === 401) { doLogout(true); return; }
     toastError(err);
+    if (state.view === 'workbench' && managed()) updateDirty();
     return null;
   }
 }
@@ -391,6 +392,7 @@ function initWorkbench() {
   $('#btn-redo').onclick = redo;
   $('#btn-save').onclick = saveVersion;
   $('#btn-exit-readonly').onclick = () => {
+    if (managed() && workflow.task.status !== 'active') return;
     state.viewingVersion = null;
     state.selection = null;
     refreshWorkbench();
@@ -409,7 +411,8 @@ function initWorkbench() {
 function patchSelected(patch, label) {
   const d = selected();
   if (!d) return toast('请先选择目标', 'err');
-  if (state.viewingVersion) return toast('历史版本只读，无法修改', 'err');
+  if (!writable()) return toast('历史版本只读，无法修改', 'err');
+  snapshotLocal();
   return action(async () => {
     const updated = await API.patchDetection(state.task.id, d.id, patch);
     Object.assign(d, updated);
@@ -436,6 +439,11 @@ function syncServerDraft() {
 async function pushDraftDiff() {
   const server = new Map(state.serverDraft.map(d => [d.id, d]));
   const jobs = [];
+  const target = new Set(state.draft.map(d => d.id));
+  for (const old of server.values()) {
+    if (!target.has(old.id) && old.origin !== 'model' && old.review_state !== 'deleted')
+      jobs.push(API.patchDetection(state.task.id, old.id, { review_state: 'deleted' }));
+  }
   for (const d of state.draft) {
     const old = server.get(d.id);
     if (!old) {
@@ -444,12 +452,12 @@ async function pushDraftDiff() {
       }));
       continue;
     }
-    const moved = old.polygon.some((p, i) => Math.hypot(p[0] - d.polygon[i][0], p[1] - d.polygon[i][1]) > 0.5);
+    const moved = old.polygon.some((p, i) => p[0] !== d.polygon[i][0] || p[1] !== d.polygon[i][1]);
     if (moved || old.review_state !== d.review_state || (old.note || '') !== (d.note || '')) {
       jobs.push(API.patchDetection(state.task.id, d.id, {
         polygon: moved ? d.polygon : undefined,
         review_state: d.review_state,
-        note: d.note
+        note: d.note ?? ''
       }));
     }
   }
@@ -457,10 +465,11 @@ async function pushDraftDiff() {
   const fresh = await API.getDraft(state.task.id);
   state.draft = fresh.detections;
   syncServerDraft();
+  refreshWorkbench();
 }
 
 function undo() {
-  if (state.viewingVersion) return toast('历史版本只读', 'err');
+  if (!writable()) return toast('历史版本只读', 'err');
   if (!state.undo.length) return toast('没有可撤销的操作');
   state.redo.push(clone(state.draft));
   state.draft = state.undo.pop();
@@ -471,7 +480,7 @@ function undo() {
 }
 
 function redo() {
-  if (state.viewingVersion) return toast('历史版本只读', 'err');
+  if (!writable()) return toast('历史版本只读', 'err');
   if (!state.redo.length) return toast('没有可重做的操作');
   state.undo.push(clone(state.draft));
   state.draft = state.redo.pop();
@@ -491,7 +500,13 @@ function handlesFor(d) {
 function wbDown(world, [sx, sy], ev) {
   const vp = WB.vp;
   if (ev.button === 1 || ev.button === 2) { vp.drag.pan = true; return; }
-  if (state.viewingVersion) { vp.drag.pan = true; return; }
+  if (!writable()) {
+    const hit = activeDetections().slice().reverse().find(d => G.pointInPolygon(world, d.polygon));
+    state.selection = hit?.id ?? null;
+    vp.drag.pan = true;
+    refreshWorkbench();
+    return;
+  }
 
   if (state.tool === 'ai') { aiRequest(world); return; }
   if (state.tool === 'add') { WB.drag = { kind: 'create', start: world }; return; }
@@ -598,6 +613,7 @@ function wbUp(world) {
     const w = Math.abs(world[0] - x0), h = Math.abs(world[1] - y0);
     if (w < 6 || h < 5) { WB.vp.draw(); return; }
     const box = { cx: (x0 + world[0]) / 2, cy: (y0 + world[1]) / 2, w, h, theta: 0 };
+    snapshotLocal();
     action(async () => {
       const d = await API.addDetection(state.task.id, {
         polygon: G.toPolygon(box), review_state: 'modified', origin: 'manual'
@@ -687,7 +703,7 @@ function drawWorkbench(ctx, vp) {
   }
 
   const d = selected();
-  if (d && !state.viewingVersion) {
+  if (d && writable()) {
     const h = handlesFor(d);
     const c = vp.w2s(h.box.cx, h.box.cy);
     const r = vp.w2s(h.rotate[0], h.rotate[1]);
@@ -715,6 +731,21 @@ function drawWorkbench(ctx, vp) {
     ctx.fillText('AI 候选生成中…', 16, 24);
     ctx.restore();
   }
+  if (state.geometryPreview) {
+    ctx.save();
+    ctx.beginPath();
+    state.geometryPreview.forEach(([x,y], index) => {
+      const [sx,sy] = vp.w2s(x,y);
+      if (index === 0) ctx.moveTo(sx,sy); else ctx.lineTo(sx,sy);
+    });
+    ctx.closePath();
+    ctx.setLineDash([6,4]);
+    ctx.strokeStyle = '#f5d36f';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.restore();
+  }
+
 }
 
 function refreshWorkbench() {
@@ -725,6 +756,7 @@ function refreshWorkbench() {
 }
 
 function updateDirty() {
+  renderAnnotationToolbar();
   const el = $('#wb-dirty');
   const banner = $('#wb-banner');
   if (state.viewingVersion) {
@@ -735,7 +767,9 @@ function updateDirty() {
     return;
   }
   banner.classList.add('hidden');
-  el.textContent = state.dirty ? '有未保存修改' : '无未保存修改';
+  el.textContent = managed()
+    ? API.hasDraftFailure(state.task.id) ? '草稿保存失败' : '草稿随编辑保存'
+    : state.dirty ? '有未保存修改' : '无未保存修改';
   el.className = 'tag ' + (state.dirty ? 'pending' : '');
 }
 
@@ -745,7 +779,7 @@ function renderList() {
   const f = state.listFilter;
   const rows = list.filter(d => {
     if (f === 'all') return true;
-    if (f === 'low') return d.confidence != null && d.confidence < 0.45;
+    if (f === 'low') return d.confidence != null && d.confidence < 0.45 && (!managed() || d.review_state === 'pending');
     return d.review_state === f;
   }).sort((a, b) => a.id - b.id);
 
@@ -785,6 +819,7 @@ function reasonTagsFor(id) {
 }
 
 function renderDetail() {
+  state.geometryPreview = null;
   const host = $('#wb-detail');
   const d = selected();
   const tagEl = $('#detail-origin');
@@ -817,13 +852,39 @@ function renderDetail() {
       <div class="row" style="margin-top:5px;gap:5px">${reasonTagsFor(d.id)}</div>
       ${dup ? `<div class="dim" style="font-size:11px;margin-top:6px">与 #${dup.partner_id} 多边形 IoU ${dup.iou.toFixed(3)}，低于 merge_iou ${paramsNow().merge_iou}，未被 NMS 合并</div>` : ''}
     </div>` : ''}
+    ${writable() ? `<form id="det-geometry" class="annotation-geometry">
+      ${[['cx','中心 X',box.cx],['cy','中心 Y',box.cy],['w','长度',box.w],
+          ['h','宽度',box.h],['theta','角度 °',box.theta * 180 / Math.PI]].map(([key,label,value]) =>
+        `<label>${label}<input type="number" name="${key}" step="any" value="${value.toFixed(2)}" required></label>`).join('')}
+      <button class="btn sm">应用数值</button>
+    </form>` : ''}
     <label class="dim" style="font-size:11.5px">备注</label>
-    <textarea id="det-note" placeholder="记录复核判断依据…" ${state.viewingVersion ? 'disabled' : ''}>${d.note || ''}</textarea>
+    <textarea id="det-note" placeholder="记录复核判断依据…" ${!writable() ? 'disabled' : ''}>${escapeWorkflow(d.note)}</textarea>
     <div class="row" style="margin-top:8px">
-      <button class="btn sm" id="btn-note-save" ${state.viewingVersion ? 'disabled' : ''}>保存备注</button>
+      <button class="btn sm" id="btn-note-save" ${!writable() ? 'disabled' : ''}>保存备注</button>
       <button class="btn sm" id="btn-locate">定位</button>
     </div>`;
 
+  const geometryForm = $('#det-geometry');
+  if (geometryForm) geometryForm.onsubmit = event => {
+    event.preventDefault();
+    const data = new FormData(geometryForm);
+    const [cx,cy,w,h,theta] = ['cx','cy','w','h','theta'].map(key => Number(data.get(key)));
+    const shape = { cx, cy, w, h, theta: theta * Math.PI / 180 };
+    const polygon = G.toPolygon(shape);
+    const width = state.image?.width || IMG_W, height = state.image?.height || IMG_H;
+    if (![cx,cy,w,h,theta].every(Number.isFinite) || w <= 0 || h <= 0 ||
+        polygon.some(([x,y]) => x < 0 || y < 0 || x > width || y > height))
+      return toast('旋转框须有正宽高且位于原图范围内', 'err');
+    patchSelected({ polygon, review_state: 'modified' }, '已应用数值');
+  };
+  if (geometryForm) geometryForm.oninput = () => {
+    const data = new FormData(geometryForm);
+    const [cx,cy,w,h,theta] = ['cx','cy','w','h','theta'].map(key => Number(data.get(key)));
+    state.geometryPreview = w > 0 && h > 0 && [cx,cy,w,h,theta].every(Number.isFinite)
+      ? G.toPolygon({cx,cy,w,h,theta:theta * Math.PI / 180}) : null;
+    WB.vp.draw();
+  };
   const noteBtn = $('#btn-note-save');
   if (noteBtn) noteBtn.onclick = () => patchSelected({ note: $('#det-note').value }, '备注已保存');
   $('#btn-locate').onclick = () => centerOn(d.id);
@@ -1088,7 +1149,7 @@ function renderTask() {
 
   $('#btn-run-task').disabled = !state.image || (t && ['running', 'merging'].includes(t.status));
   $('#btn-cancel-task').disabled = !t || t.status !== 'running';
-  $('#btn-retry-task').disabled = !t || !['done', 'cancelled', 'failed'].includes(t.status);
+  $('#btn-retry-task').disabled = !t || !['cancelled', 'failed'].includes(t.status);
   $('#btn-goto-wb').disabled = !t || t.status !== 'done';
 
   $('#task-log').innerHTML = t
@@ -1222,7 +1283,7 @@ function renderStats() {
 /* -------------------------------------------------------------------- history */
 
 async function saveVersion() {
-  if (state.viewingVersion) return toast('历史版本只读', 'err');
+  if (!writable()) return toast('历史版本只读', 'err');
   if (!state.dirty) return toast('没有需要保存的修改');
   await action(async () => {
     const v = await API.commitVersion(state.task.id, { label: '人工修订' });
@@ -1301,7 +1362,9 @@ function renderHistory() {
 
 function renderExport() {
   const sel = $('#ex-version');
-  const list = state.versions.length ? state.versions : [];
+  const list = managed()
+    ? state.versions.filter(version => workflow.task.status === 'signed' && version.id === workflow.task.version_id)
+    : state.versions;
   sel.innerHTML = list.slice().reverse()
     .map(v => `<option value="${v.id}">${v.id} · ${v.label}</option>`).join('')
     || '<option value="">（暂无版本）</option>';
@@ -1335,9 +1398,11 @@ async function doExport() {
     for (const f of job.files) {
       if (!f.url) continue;
       const a = document.createElement('a');
-      a.href = f.url;
+      const objectUrl = API.mode === 'http' ? URL.createObjectURL(await API.downloadExport(job.id, f.name)) : null;
+      a.href = objectUrl || f.url;
       a.download = f.name;
       a.click();
+      if (objectUrl) setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
       if (f.format === 'png') png = true;
     }
     $('#ex-status').textContent = png
@@ -1350,11 +1415,13 @@ async function doExport() {
 /* ------------------------------------------------------------------------ AI */
 
 async function aiRequest(world) {
-  if (!state.image) return toast('请先上传影像', 'err');
+  if (!state.image || !writable()) return;
+  const taskId = state.task?.id;
   state.ai = { status: 'requesting' };
   WB.vp.draw();
   try {
     const cand = await API.requestAiCandidate(state.image.id, { point: world, mode: 'point' });
+    if (state.task?.id !== taskId || state.view !== 'workbench') return;
     state.ai = { status: 'preview', polygon: cand.polygon, candidate: cand };
     WB.vp.draw();
     showAiDialog(cand);
@@ -1366,6 +1433,7 @@ async function aiRequest(world) {
 }
 
 function showAiDialog(cand) {
+  const taskId = state.task.id;
   const host = $('#wb-detail');
   host.innerHTML = `
     <div class="row" style="margin-bottom:10px">
@@ -1382,13 +1450,18 @@ function showAiDialog(cand) {
       候选未确认前不进入修订、统计与导出；确认后记录 AI 辅助来源，且不伪造检测置信度。
     </div>
     <div class="row">
-      <button class="btn primary sm" id="ai-accept">接受</button>
+      <button class="btn primary sm" id="ai-accept">新增候选框</button>
+      ${managed() && selected() ? '<button class="btn sm" id="ai-replace">替换选中框</button>' : ''}
       <button class="btn sm" id="ai-cancel">取消</button>
     </div>`;
 
-  $('#ai-accept').onclick = () => action(async () => {
-    const d = await API.acceptAiCandidate(cand.id);
-    state.draft.push(d);
+  const applyCandidate = replaceId => action(async () => {
+    if (state.task.id !== taskId || !writable()) return;
+    snapshotLocal();
+    const d = await API.acceptAiCandidate(cand.id, taskId, replaceId);
+    if (state.task.id !== taskId) return;
+    if (replaceId == null) state.draft.push(d);
+    else state.draft = state.draft.map(box => box.id === d.id ? d : box);
     state.selection = d.id;
     state.dirty = true;
     syncServerDraft();
@@ -1398,6 +1471,12 @@ function showAiDialog(cand) {
     toast('AI 候选已接受并计入修订', 'ok');
   });
 
+  $('#ai-accept').onclick = () => applyCandidate();
+  const replace = $('#ai-replace');
+  if (replace) {
+    const target = selected().id;
+    replace.onclick = () => applyCandidate(target);
+  }
   $('#ai-cancel').onclick = () => action(async () => {
     await API.cancelAiCandidate(cand.id);
     state.ai = { status: 'idle' };
@@ -1489,13 +1568,20 @@ async function loadLibrary() {
 /** 打开一幅影像：优先载入已完成任务，其次接上运行中的任务 */
 async function openImage(imageId) {
   await action(async () => {
+    workflow.task = null;
+    state.viewingVersion = null;
     state.image = await API.getImage(imageId);
     const mine = state.tasks.filter(t => t.image_id === imageId);
     const done = mine.find(t => t.status === 'done');
     const running = mine.find(t => ['queued', 'running', 'merging'].includes(t.status));
     if (done) {
-      state.task = await API.getTask(done.id);
-      await loadResult();
+      if (API.mode === 'http') {
+        await loadAnnotations();
+        const item = workflow.items.find(entry => entry.task_id === done.id);
+        if (item) return enterAnnotation(item);
+      }
+      await loadTaskContext(done.id);
+
       switchView('workbench');
       toast('已载入该影像最近的完成结果', 'ok');
       return;
@@ -1515,12 +1601,27 @@ async function openImage(imageId) {
 }
 
 /** 打开一个已有任务 */
+async function loadTaskContext(taskId, item = null) {
+  const task = await API.getTask(taskId);
+  const image = await API.getImage(task.image_id);
+  workflow.task = item;
+  state.task = task;
+  state.image = image;
+  state.viewingVersion = null;
+  state.selection = null;
+  state.ai = { status: 'idle' };
+  if (task.status === 'done') await loadResult();
+}
+
 async function openTask(taskId) {
   await action(async () => {
-    state.task = await API.getTask(taskId);
-    try { state.image = await API.getImage(state.task.image_id); } catch (_) { /* 用列表里的摘要即可 */ }
+    if (API.mode === 'http') {
+      await loadAnnotations();
+      const item = workflow.items.find(entry => entry.task_id === taskId);
+      if (item) return enterAnnotation(item);
+    }
+    await loadTaskContext(taskId);
     if (state.task.status === 'done') {
-      await loadResult();
       switchView('workbench');
       return;
     }
@@ -1536,7 +1637,7 @@ function renderLibrary() {
     imgBox.innerHTML = state.images.length
       ? state.images.map(i => `
         <div class="lib-row" data-image="${i.id}" role="button" tabindex="0">
-          <span class="lib-name">${i.file_name}</span>
+          <span class="lib-name">${escapeWorkflow(i.file_name)}</span>
           <span class="dim">${i.width} × ${i.height}</span>
           <span class="dim">${i.bytes ? (i.bytes / 1048576).toFixed(2) + ' MB' : '—'}</span>
         </div>`).join('')
@@ -1551,7 +1652,7 @@ function renderLibrary() {
     taskBox.innerHTML = state.tasks.length
       ? state.tasks.map(t => `
         <div class="lib-row" data-task="${t.id}" role="button" tabindex="0">
-          <span class="lib-name">${(t.image && t.image.file_name) || t.image_id}</span>
+          <span class="lib-name">${escapeWorkflow(t.image?.file_name || t.image_id)}</span>
           <span class="tag ${t.status === 'done' ? 'confirmed' : ''}">${TASK_STATUS_LABEL[t.status] || t.status}</span>
           <span class="dim">${t.tiles_done}/${t.tiles_total} 片 · ${t.final_count == null ? '—' : t.final_count} 框</span>
         </div>`).join('')
@@ -1596,6 +1697,8 @@ function renderProject() {
 
 function switchView(name) {
   state.view = name;
+  const contextual = managed() && ['stats','history','export','review'].includes(name);
+  $('#annotation-back').hidden = !contextual;
   $$('.view').forEach(v => v.classList.toggle('on', v.id === 'view-' + name));
   $$('#rail button').forEach(b => b.classList.toggle('on', b.dataset.view === name));
 
@@ -1656,7 +1759,17 @@ async function restoreSession() {
   $('#app').classList.remove('hidden');
   renderModeBadge();
   await loadLibrary();
-  switchView('project');
+  if (API.mode === 'http') {
+    $$('#rail [data-annotation]').forEach(button => {
+      button.hidden = lead() ? !['manage','approval'].includes(button.dataset.annotation)
+        : !['hall','mine'].includes(button.dataset.annotation);
+    });
+    $$('#rail [data-view]').forEach(button => {
+      button.hidden = !lead() || !['project','upload'].includes(button.dataset.view);
+    });
+    $('#rail .rail-link').hidden = !lead();
+    await annotationPage(lead() ? 'manage' : 'hall');
+  } else switchView('project');
   renderUpload();
   renderTask();
   renderExport();
@@ -1692,6 +1805,8 @@ async function doLogout(silent) {
   state.user = null;
   state.project = null;
   state.task = null;
+  workflow.task = null;
+  state.viewingVersion = null;
   state.draft = [];
   state.versions = [];
   state.image = null;
@@ -1712,7 +1827,11 @@ async function doLogout(silent) {
 /* --------------------------------------------------------------------- init */
 
 function bindGlobal() {
-  $$('#rail button').forEach(b => b.onclick = () => switchView(b.dataset.view));
+  $('#annotation-back').onclick = () => switchView('workbench');
+  $$('#rail [data-annotation]').forEach(button => {
+    button.onclick = () => annotationPage(button.dataset.annotation);
+  });
+  $$('#rail button[data-view]').forEach(b => b.onclick = () => switchView(b.dataset.view));
   $$('[data-goto]').forEach(b => b.onclick = () => switchView(b.dataset.goto));
   $('#btn-q-refresh').onclick = () => action(async () => {
     await loadReview();

@@ -68,6 +68,10 @@
 
   <div class="shell">
     <nav class="rail" id="rail">
+      <button type="button" data-annotation="hall" hidden>任务大厅</button>
+      <button type="button" data-annotation="mine" hidden>我的任务</button>
+      <button type="button" data-annotation="manage" hidden>项目任务</button>
+      <button type="button" data-annotation="approval" hidden>待审核</button>
       <button data-view="project"><span class="ic">◱</span>项目</button>
       <button data-view="upload"><span class="ic">↑</span>上传</button>
       <button data-view="task"><span class="ic">▶</span>任务</button>
@@ -82,6 +86,8 @@
     <main>
 
       <!-- ---------- 项目 ---------- -->
+      <button class="btn sm annotation-back" type="button" id="annotation-back" hidden>返回当前工作台</button>
+      <section class="view" id="view-annotation"><div class="pane" id="annotation-content"></div></section>
       <section class="view" id="view-project">
         <div class="pad">
           <div class="view-head">
@@ -279,6 +285,7 @@
             <span class="spacer"></span>
             <button class="btn sm" id="btn-exit-readonly">返回当前工作副本</button>
           </div>
+          <div id="annotation-workbench" class="annotation-toolbar"></div>
           <div class="wb-bar">
             <div class="tool-group" id="tool-group">
               <button class="tool on" data-tool="select">选择</button>
@@ -497,6 +504,7 @@
 <script src="tiles-view.js"></script>
 <script src="api/mock-backend.js"></script>
 <script src="api/client.js"></script>
+<script src="annotation-workflow.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

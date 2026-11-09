@@ -947,6 +947,96 @@ with patch.object(worker, "_ensure_v0", side_effect=lambda *args, **kwargs: os._
                         (task_id,))
         return [row["detection_id"] for row in rows]
 
+    def test_annotation_workflow(self):
+        from concurrent.futures import ThreadPoolExecutor
+
+        image = self._upload(_image_bytes(), "annotation.png")
+        analyst = self.client.post("/auth/login", json={
+            "username": "analyst", "password": PASSWORD, "project_id": "harbor-a"}).json()
+        worker = {"Authorization": "Bearer " + analyst["token"]}
+        analyst_id = db.one("SELECT id FROM users WHERE username='analyst'")["id"]
+        peer_id = db.new_id("usr")
+        db.execute("INSERT INTO users(id,username,password_hash,display_name,status,created_at) "
+                   "SELECT ?,?,password_hash,'Second analyst','active',? FROM users WHERE id=?",
+                   (peer_id, peer_id, db.now(), analyst_id))
+        db.execute("INSERT INTO members(project_id,user_id,role) VALUES('harbor-a',?,?)",
+                   (peer_id, config.USER_ROLE_ANALYST))
+        peer_login = self.client.post("/auth/login", json={
+            "username": peer_id, "password": PASSWORD, "project_id": "harbor-a"}).json()
+        peer = {"Authorization": "Bearer " + peer_login["token"]}
+
+        def seed(detections):
+            task = db.new_id("tsk")
+            db.execute("INSERT INTO tasks(id,project_id,image_id,created_by,status,attempt,"
+                       "tiles_total,tiles_done,temp_count,final_count,parameters,cancel_requested,created_at)"
+                       " VALUES(?,'harbor-a',?,'usr_owner','done',1,1,1,?,?,?,0,?)",
+                       (task, image["image_id"], len(detections), len(detections), "{}", db.now()))
+            self._seed_v0(task, detections)
+            return task
+
+        task = seed([_fake_detection(1), {**_fake_detection(2), "confidence": 0.25}])
+        empty = seed([])
+        path = f"/api/v1/tasks/{task}"
+        draft_path = path + "/draft"
+        second = f"/api/v1/tasks/{empty}"
+
+        def transition(operation, headers, expected=200, url=path, **body):
+            response = self.client.post(url + "/annotation/" + operation, json=body, headers=headers)
+            self.assertEqual(response.status_code, expected, response.text)
+            return response.json()
+
+        transition("publish", self.headers)
+        transition("assign", self.headers, url=second, assignee=analyst_id)
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            claims = list(pool.map(lambda headers: self.client.post(path + "/annotation/claim",
+                                                                     headers=headers, json={}),
+                                   [worker, peer]))
+        self.assertEqual(sorted(r.status_code for r in claims), [200, 409])
+        winner = worker if claims[0].status_code == 200 else peer
+        loser = peer if winner == worker else worker
+        transition("release", winner)
+        transition("claim", worker)
+        transition("start", worker, 409, url=second)
+        started = transition("start", worker)
+        revision = started["revision"]
+        self.assertEqual(self.client.patch(draft_path + "/detections/1", json={"revision": revision},
+                                           headers=loser).status_code, 409)
+        transition("submit", worker, 409, revision=revision)
+        bulk = self.client.post(draft_path + "/confirm-high", json={"revision": revision}, headers=worker)
+        self.assertEqual(bulk.status_code, 200, bulk.text)
+        self.assertEqual([d["review_state"] for d in bulk.json()["detections"]], ["confirmed", "pending"])
+        stale = self.client.patch(draft_path + "/detections/2",
+                                  json={"revision": revision, "review_state": "confirmed"}, headers=worker)
+        self.assertEqual(stale.json()["error"]["code"], "STALE_DRAFT")
+        revision = bulk.json()["annotation_revision"]
+        updated = self.client.patch(draft_path + "/detections/2",
+                                    json={"revision": revision, "review_state": "confirmed"}, headers=worker)
+        self.assertEqual(updated.status_code, 200, updated.text)
+        submitted = transition("submit", worker, revision=updated.json()["annotation_revision"])
+        self.assertEqual(submitted["version_id"], "v1")
+        denied = self.client.post(f"/versions/v1/exports?task_id={task}", json={}, headers=self.headers)
+        self.assertEqual(denied.json()["error"]["code"], "ANNOTATION_NOT_SIGNED")
+        other = transition("start", worker, url=second)
+        transition("return", self.headers, reason="Check target", target_id=2)
+        transition("start", worker, 409)
+        transition("pause", worker, url=second)
+        returned = transition("start", worker)
+        self.assertEqual(returned["target_id"], 2)
+        self.assertGreater(returned["revision"], other["revision"])
+        revision = returned["revision"]
+        fixed = self.client.patch(draft_path + "/detections/2",
+                                  json={"revision": revision, "review_state": "modified"}, headers=worker)
+        resubmitted = transition("submit", worker, revision=fixed.json()["annotation_revision"])
+        self.assertEqual(resubmitted["version_id"], "v2")
+        signed = transition("accept", self.headers)
+        self.assertEqual(signed["status"], "signed")
+        self.assertEqual(self.client.post(f"/versions/v1/exports?task_id={task}", json={},
+                                          headers=self.headers).status_code, 409)
+        previous = self.client.get(f"/versions/v1?task_id={task}", headers=self.headers).json()
+        self.assertEqual(previous["detections"][1]["review_state"], "confirmed")
+        resumed = transition("start", worker, url=second)
+        self.assertEqual(transition("submit", worker, url=second, revision=resumed["revision"])["version_id"], "v1")
+
     def test_draft_created_from_v0(self):
         from backend import api
         task_id = f"tsk_{uuid.uuid4().hex[:8]}"

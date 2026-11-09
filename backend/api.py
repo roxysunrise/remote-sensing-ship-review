@@ -19,7 +19,7 @@ from fastapi.responses import FileResponse, Response
 from algorithm.errors import DetectionError
 from algorithm.ship_detector import ShipDetector
 
-from . import (ai_assist, ai_planner, config, db, detector, errors, geometry, imaging, security,
+from . import (annotation, ai_assist, ai_planner, config, db, detector, errors, geometry, imaging, security,
                stats, storage, tiles)
 
 router = APIRouter()
@@ -880,17 +880,67 @@ def _draft_detections(task_id: str) -> list[dict]:
     return [_detection_payload(row) for row in rows]
 
 
+@router.get("/projects/{project_id}/annotations")
+def list_annotations(project_id: str, state: dict = State) -> dict:
+    role = _member(project_id, state)
+    return annotation.listing(project_id, state["user"]["id"], role == config.USER_ROLE_OWNER)
+
+
+def _annotation_snapshot(conn, task, state, detections):
+    task_id = task["id"]
+    latest = conn.execute("SELECT * FROM versions WHERE task_id=? "
+                          "ORDER BY CAST(SUBSTR(label,2) AS INTEGER) DESC LIMIT 1", (task_id,)).fetchone()
+    base = json.loads(latest["detections"]) if latest else []
+    label = f"v{int(latest['label'][1:]) + 1}" if latest else "v1"
+    conn.execute("INSERT INTO versions(task_id,label,project_id,author,created_at,readonly,summary,counts,detections)"
+                 " VALUES(?,?,?,?,?,1,?,?,?)",
+                 (task_id, label, task["project_id"], state["user"]["display_name"], db.now(),
+                  json.dumps(_version_diff(base, detections)), json.dumps(_version_counts(detections)),
+                  json.dumps(detections, ensure_ascii=False)))
+    conn.execute("UPDATE draft_state SET base_version=?, updated_at=? WHERE task_id=?", (label, db.now(), task_id))
+    return label
+
+
+@router.post("/tasks/{task_id}/annotation/{operation}")
+@annotation.serialized
+def change_annotation(task_id: str, operation: str, body: dict = Body(default_factory=dict),
+                      state: dict = State) -> dict:
+    task = _task_or_404(task_id, state)
+    role = _member(task["project_id"], state)
+    if task["status"] == "done":
+        _version_row(task_id, "v0")
+        _ensure_draft(task_id)
+    return annotation.transition(task, state, role, operation, body, _draft_detections, _annotation_snapshot)
+
+
+@router.post("/tasks/{task_id}/draft/confirm-high")
+@annotation.atomic
+def confirm_high(task_id: str, body: dict = Body(...), state: dict = State) -> dict:
+    _task_or_404(task_id, state)
+    row = annotation.guard(task_id, state, body)
+    if row is None:
+        raise errors.conflict("ANNOTATION_NOT_FOUND", "仅标注任务支持批量确认")
+    db.execute("UPDATE draft_detections SET review_state='confirmed' WHERE task_id=? "
+               "AND review_state='pending' AND confidence>=0.45", (task_id,))
+    return annotation.changed(row, {"detections": _draft_detections(task_id)})
+
+
 @router.get("/tasks/{task_id}/draft")
+@annotation.serialized
 def get_draft(task_id: str, state: dict = State) -> dict:
     _task_or_404(task_id, state)
     _ensure_draft(task_id)
-    return {"task_id": task_id, "detections": _draft_detections(task_id)}
+    row = annotation.get(task_id)
+    return {"task_id": task_id, "detections": _draft_detections(task_id),
+            "annotation_revision": row["revision"] if row else None}
 
 
 @router.patch("/tasks/{task_id}/draft/detections/{detection_id}")
+@annotation.atomic
 def patch_detection(task_id: str, detection_id: int, body: dict = Body(...),
                     state: dict = State) -> dict:
     _task_or_404(task_id, state)
+    annotation_row = annotation.guard(task_id, state, body)
     _ensure_draft(task_id)
     row = db.one("SELECT * FROM draft_detections WHERE task_id=? AND detection_id=?",
                  (task_id, detection_id))
@@ -923,13 +973,15 @@ def patch_detection(task_id: str, detection_id: int, body: dict = Body(...),
         (json.dumps(polygon) if polygon else None, review_state, note, task_id, detection_id),
     )
     db.execute("UPDATE draft_state SET updated_at=? WHERE task_id=?", (db.now(), task_id))
-    return _detection_payload(db.one(
-        "SELECT * FROM draft_detections WHERE task_id=? AND detection_id=?", (task_id, detection_id)))
+    return annotation.changed(annotation_row, _detection_payload(db.one(
+        "SELECT * FROM draft_detections WHERE task_id=? AND detection_id=?", (task_id, detection_id))))
 
 
 @router.post("/tasks/{task_id}/draft/detections", status_code=201)
+@annotation.atomic
 def add_detection(task_id: str, body: dict = Body(...), state: dict = State) -> dict:
     _task_or_404(task_id, state)
+    annotation_row = annotation.guard(task_id, state, body)
     _ensure_draft(task_id)
     polygon = body.get("polygon")
     if not polygon or len(polygon) != 4:
@@ -958,13 +1010,15 @@ def add_detection(task_id: str, body: dict = Body(...), state: dict = State) -> 
          body.get("note"), body.get("candidate_id")),
     )
     db.execute("UPDATE draft_state SET updated_at=? WHERE task_id=?", (db.now(), task_id))
-    return _detection_payload(db.one(
-        "SELECT * FROM draft_detections WHERE task_id=? AND detection_id=?", (task_id, next_id)))
+    return annotation.changed(annotation_row, _detection_payload(db.one(
+        "SELECT * FROM draft_detections WHERE task_id=? AND detection_id=?", (task_id, next_id))))
 
 
 @router.post("/tasks/{task_id}/draft/reset")
+@annotation.atomic
 def reset_draft(task_id: str, body: dict = Body(...), state: dict = State) -> dict:
     _task_or_404(task_id, state)
+    annotation_row = annotation.guard(task_id, state, body)
     label = str(body.get("version_id") or "v0")
     row = db.one("SELECT * FROM versions WHERE task_id=? AND label=?", (task_id, label))
     if row is None:
@@ -986,7 +1040,7 @@ def reset_draft(task_id: str, body: dict = Body(...), state: dict = State) -> di
                      " updated_at=excluded.updated_at", (task_id, label, db.now()))
     db.log_event("draft.reset", project_id=state["project_id"], user_id=state["user"]["id"],
                  target=task_id, detail={"version": label})
-    return {"task_id": task_id, "detections": _draft_detections(task_id)}
+    return annotation.changed(annotation_row, {"task_id": task_id, "detections": _draft_detections(task_id)})
 
 
 # --------------------------------------------------------------------------
@@ -1036,9 +1090,12 @@ def list_versions(task_id: str, state: dict = State) -> list[dict]:
 
 
 @router.post("/tasks/{task_id}/versions", status_code=201)
+@annotation.atomic
 def commit_version(task_id: str, body: dict = Body(default_factory=dict),
                    state: dict = State) -> dict:
     row = _task_or_404(task_id, state)
+    if annotation.get(task_id):
+        raise errors.conflict("ANNOTATION_MANAGED", "请通过标注任务提交审核")
     if row["status"] != "done":
         raise errors.conflict("RESULT_NOT_READY", "任务尚未完成，不能提交版本")
     _ensure_draft(task_id)
@@ -1111,8 +1168,10 @@ def review_queue(task_id: str, state: dict = State) -> dict:
 
 
 @router.post("/tasks/{task_id}/draft/regions")
+@annotation.atomic
 def create_region(task_id: str, body: dict = Body(...), state: dict = State) -> dict:
     row = _task_or_404(task_id, state)
+    annotation_row = annotation.guard(task_id, state, body)
     polygon = body.get("polygon") or []
     if len(polygon) < 3:
         raise errors.invalid("INVALID_REGION", "区域至少需要 3 个顶点")
@@ -1135,12 +1194,12 @@ def create_region(task_id: str, body: dict = Body(...), state: dict = State) -> 
                " VALUES(?,?,?,?,?,?,?)",
                (region_id, task_id, row["project_id"], name, json.dumps(points),
                 "centre_point_inside", db.now()))
-    return {
+    return annotation.changed(annotation_row, {
         "id": region_id, "task_id": task_id, "name": name, "polygon": points,
         "rule": "centre_point_inside",
         "counts": geometry.region_counts(draft, points),
         "area_px2": int(round(geometry.polygon_area(points))),
-    }
+    })
 
 
 @router.get("/tasks/{task_id}/draft/regions")
@@ -1248,9 +1307,13 @@ def _export_payload(row) -> dict:
 
 
 @router.post("/versions/{version_id}/exports", status_code=202)
+@annotation.serialized
 def create_export(version_id: str, task_id: str = Query(...),
                   body: dict = Body(default_factory=dict), state: dict = State) -> dict:
     task = _task_or_404(task_id, state)
+    workflow = annotation.get(task_id)
+    if workflow and (workflow["status"] != "signed" or workflow["version_id"] != version_id):
+        raise errors.conflict("ANNOTATION_NOT_SIGNED", "只能导出已签收版本")
     _version_row(task_id, version_id)
     formats = body.get("formats") or ["csv", "json", "png"]
     if not isinstance(formats, list) or any(f not in {"csv", "json", "png"} for f in formats):
@@ -1371,6 +1434,7 @@ def create_candidate(image_id: str, body: dict = Body(...), state: dict = State)
 
 
 @router.post("/ai-candidates/{candidate_id}/accept", status_code=201)
+@annotation.atomic
 def accept_candidate(candidate_id: str, body: dict = Body(default_factory=dict),
                      state: dict = State) -> dict:
     candidate = db.one("SELECT * FROM candidates WHERE id=?", (candidate_id,))
@@ -1391,6 +1455,20 @@ def accept_candidate(candidate_id: str, body: dict = Body(default_factory=dict),
         if task is None:
             raise errors.conflict("NO_TASK", "该影像还没有已完成的任务，无法写入候选")
 
+    annotation_row = annotation.guard(task["id"], state, body)
+    replace_id = body.get("replace_id")
+    if replace_id is not None:
+        if not annotation_row or type(replace_id) is not int:
+            raise errors.invalid("INVALID_ARGUMENT", "请选择要替换的目标")
+        with db.tx() as conn:
+            updated = conn.execute("UPDATE draft_detections SET polygon=?,review_state='modified',origin='ai',"
+                                   " confidence=NULL,ai_candidate_id=? WHERE task_id=? AND detection_id=?",
+                                   (candidate["polygon"], candidate_id, task["id"], replace_id))
+            if not updated.rowcount:
+                raise errors.not_found("DETECTION_NOT_FOUND", "目标不存在")
+            conn.execute("UPDATE candidates SET status='accepted' WHERE id=?", (candidate_id,))
+        return annotation.changed(annotation_row, _detection_payload(db.one(
+            "SELECT * FROM draft_detections WHERE task_id=? AND detection_id=?", (task["id"], replace_id))))
     _ensure_draft(task["id"])
     next_id = db.one("SELECT COALESCE(MAX(detection_id),0)+1 AS nid FROM draft_detections WHERE task_id=?",
                      (task["id"],))["nid"]
@@ -1406,8 +1484,8 @@ def accept_candidate(candidate_id: str, body: dict = Body(default_factory=dict),
                  target=candidate_id,
                  detail={"task_id": task["id"], "detection_id": next_id,
                          "source": candidate["source"], "quality": candidate["quality"]})
-    return _detection_payload(db.one(
-        "SELECT * FROM draft_detections WHERE task_id=? AND detection_id=?", (task["id"], next_id)))
+    return annotation.changed(annotation_row, _detection_payload(db.one(
+        "SELECT * FROM draft_detections WHERE task_id=? AND detection_id=?", (task["id"], next_id))))
 
 
 @router.post("/ai-candidates/{candidate_id}/cancel")
