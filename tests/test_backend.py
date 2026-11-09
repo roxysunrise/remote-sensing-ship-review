@@ -993,14 +993,13 @@ with patch.object(worker, "_ensure_v0", side_effect=lambda *args, **kwargs: os._
                                    [worker, peer]))
         self.assertEqual(sorted(r.status_code for r in claims), [200, 409])
         winner = worker if claims[0].status_code == 200 else peer
-        loser = peer if winner == worker else worker
         transition("release", winner)
         transition("claim", worker)
         transition("start", worker, 409, url=second)
         started = transition("start", worker)
         revision = started["revision"]
         self.assertEqual(self.client.patch(draft_path + "/detections/1", json={"revision": revision},
-                                           headers=loser).status_code, 409)
+                                           headers=peer).status_code, 409)
         transition("submit", worker, 409, revision=revision)
         bulk = self.client.post(draft_path + "/confirm-high", json={"revision": revision}, headers=worker)
         self.assertEqual(bulk.status_code, 200, bulk.text)

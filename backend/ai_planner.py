@@ -40,7 +40,12 @@ def _encode(image) -> str:
     return "data:image/jpeg;base64," + base64.b64encode(buffer.getvalue()).decode()
 
 
-def _post(payload: dict) -> dict | None:
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+def _post(payload: dict, *, local_only=False) -> dict | None:
     headers = {"Content-Type": "application/json"}
     if config.VLM_API_KEY:
         headers["Authorization"] = f"Bearer {config.VLM_API_KEY}"
@@ -50,11 +55,15 @@ def _post(payload: dict) -> dict | None:
         headers=headers,
         method="POST",
     )
-    with urllib.request.urlopen(request, timeout=config.VLM_TIMEOUT) as response:
+    if local_only:
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoRedirect()).open
+    else:
+        opener = urllib.request.urlopen
+    with opener(request, timeout=config.VLM_TIMEOUT) as response:
         return json.loads(response.read().decode("utf-8"))
 
 
-def _call_vlm(data_url: str) -> dict | None:
+def _call_vlm(data_url: str, *, local_only=False) -> dict | None:
     """调用一次（含重试）。返回 {"verdict", "reason", "usage", "attempts"} 或 None。"""
     payload = {
         "model": config.VLM_MODEL,
@@ -72,7 +81,7 @@ def _call_vlm(data_url: str) -> dict | None:
     for attempt in range(max(1, config.VLM_RETRIES + 1)):
         attempts = attempt + 1
         try:
-            body = _post(payload)
+            body = _post(payload, local_only=True) if local_only else _post(payload)
         except (urllib.error.URLError, TimeoutError, ValueError, OSError):
             continue
         parsed = _parse(_content_of(body))
@@ -147,7 +156,7 @@ def _record(project_id: str | None, user_id: str | None, target: str | None, det
 
 
 def make_gate(record: dict | None = None, *, project_id: str | None = None,
-              user_id: str | None = None):
+              user_id: str | None = None, local_only: bool = False):
     """返回 gate 函数：输入 ROI 图，输出 "yes" / "no" / None（没意见）。"""
     if not enabled():
         return None
@@ -159,7 +168,7 @@ def make_gate(record: dict | None = None, *, project_id: str | None = None,
 
     def gate(crop):
         started = time.perf_counter()
-        result = _call_vlm(_encode(crop))
+        result = _call_vlm(_encode(crop), local_only=True) if local_only else _call_vlm(_encode(crop))
         elapsed = round((time.perf_counter() - started) * 1000, 1)
         verdict = None if result is None else ("yes" if result["has_ship"] else "no")
         detail = {

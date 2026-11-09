@@ -3,10 +3,14 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0a1218">
 <title>影像检测与标注工作台 · 图片 / 视频 / AI 辅助</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23a274ff'/%3E%3Cpath d='M7 21h18l-3 5H10z' fill='%230a0f14'/%3E%3Crect x='14' y='7' width='4' height='11' fill='%230a0f14'/%3E%3C/svg%3E">
-<link rel="stylesheet" href="styles.css?v=2">
-<link rel="stylesheet" href="detect.css?v=2">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%232f5bff'/%3E%3Cpath d='M7 21h18l-3 5H10z' fill='%23ffffff'/%3E%3Crect x='14' y='7' width='4' height='11' fill='%23ffffff'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css?v=54">
+<link rel="stylesheet" href="detect.css?v=74">
 </head>
 <body>
 
@@ -17,7 +21,7 @@
       <span class="mark">检</span>
       <span>
         影像检测与标注
-        <small>image / video · AI-assisted annotation</small>
+        <small>IMAGE / VIDEO · AI ANNOTATION</small>
       </span>
     </a>
 
@@ -31,6 +35,7 @@
     <div class="dt-top-right">
       <span class="badge ai" id="dt-mode-badge">接口已预留</span>
       <a class="btn sm ghost" href="index.html">主工作台</a>
+    <span class="topbar-strip" aria-hidden="true"><i></i><i></i><i></i></span>
     </div>
   </header>
 
@@ -38,24 +43,38 @@
 
     <!-- ================= 左：媒体与目标 ================= -->
     <aside class="dt-side left">
-      <section class="dt-sec">
+      <section class="dt-sec sec-media">
         <div class="dt-sec-h">媒体源</div>
         <div class="dt-drop" id="dt-drop">
           <div class="big">拖入图片或视频</div>
           <div class="muted">PNG / JPEG · WebM / MP4</div>
           <div class="dt-drop-actions">
-            <button class="btn sm" id="dt-pick" type="button">选择文件</button>
+            <button class="btn sm" id="dt-pick" type="button">选择图片 / 视频</button>
+            <button class="btn sm" id="dt-pick-folder" type="button">选择文件夹</button>
             <button class="btn sm" id="dt-demo-img" type="button">示例图片</button>
-            <button class="btn sm" id="dt-demo-video" type="button">生成演示视频</button>
+            <button class="btn sm" id="dt-demo-video" type="button">演示视频</button>
           </div>
-          <input type="file" id="dt-file" accept="image/png,image/jpeg,image/webp,video/mp4,video/webm,video/quicktime" hidden>
+          <div class="dt-drop-hint">支持多选图片，或一次导入整个文件夹</div>
+          <input type="file" id="dt-file" accept="image/png,image/jpeg,image/webp,image/bmp,video/mp4,video/webm,video/quicktime" multiple hidden>
+          <input type="file" id="dt-folder" accept="image/*" webkitdirectory directory multiple hidden>
         </div>
         <dl class="dt-meta" id="dt-meta">
           <dt>状态</dt><dd class="dim">等待载入</dd>
         </dl>
       </section>
 
-      <section class="dt-sec grow">
+      <section class="dt-sec sec-batch hidden" id="dt-batch-sec">
+        <div class="dt-sec-h">
+          <span>图片批次</span>
+          <span class="mono dim" id="dt-batch-count">0</span>
+          <div class="spacer"></div>
+          <button class="btn sm" id="dt-batch-all" type="button" title="逐张运行检测">批量检测</button>
+          <button class="btn sm ghost" id="dt-batch-clear" type="button" title="清空批次">清空</button>
+        </div>
+        <div class="dt-batch-list" id="dt-batch-list"></div>
+      </section>
+
+      <section class="dt-sec grow sec-targets">
         <div class="dt-sec-h">
           <span>目标列表</span>
           <span class="mono dim" id="dt-count">0</span>
@@ -69,6 +88,11 @@
         </div>
         <div class="dt-list" id="dt-list"></div>
         <div class="dt-list-foot">
+          <div class="dt-legend" title="框颜色图例：模型 / 手工 / AI">
+            <span><i class="m"></i>模型</span>
+            <span><i class="h"></i>手工</span>
+            <span><i class="a"></i>AI</span>
+          </div>
           <button class="btn sm ghost" id="dt-export" disabled>导出标注 JSON</button>
         </div>
       </section>
@@ -88,6 +112,7 @@
         <button class="btn sm primary" id="dt-detect" disabled>检测当前帧</button>
         <button class="btn sm" id="dt-auto" disabled title="播放时按固定间隔抽帧检测">连续检测</button>
         <button class="btn sm" id="dt-clear" disabled>清除本帧结果</button>
+        <span class="bar-break" aria-hidden="true"></span>
         <div class="sep"></div>
         <button class="btn sm" id="dt-fit" disabled>适应</button>
         <button class="btn sm" id="dt-one" disabled>1:1</button>
@@ -100,6 +125,7 @@
       <div class="dt-stage" id="dt-stage">
         <canvas id="dt-canvas"></canvas>
         <video id="dt-video" muted playsinline preload="auto"></video>
+        <div class="dt-scan" aria-hidden="true"></div>
 
         <div class="dt-hud tl"><span id="dt-cursor" class="mono">x — · y —</span></div>
         <div class="dt-hud tr"><span id="dt-zoom" class="mono">—</span></div>
@@ -109,8 +135,14 @@
         <div class="dt-busy hidden" id="dt-busy"><span class="spinner"></span><span id="dt-busy-text">检测中…</span></div>
 
         <div class="dt-empty" id="dt-empty">
-          <div class="dt-empty-ico">▦</div>
-          <div>拖入图片或视频，或从左侧选择示例</div>
+          <div class="dt-empty-ico" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M4 8V5.5A1.5 1.5 0 0 1 5.5 4H8M16 4h2.5A1.5 1.5 0 0 1 20 5.5V8M20 16v2.5a1.5 1.5 0 0 1-1.5 1.5H16M8 20H5.5A1.5 1.5 0 0 1 4 18.5V16"/>
+              <path d="M7.5 13h9M12 8.5v9"/>
+            </svg>
+          </div>
+          <div>拖入图片或视频，或从媒体源选择示例</div>
+          <button class="btn primary sm" id="dt-empty-pick" type="button">选择图片 / 视频</button>
           <div class="dim">图片逐幅检测；视频按帧检测，结果绑定时间戳</div>
         </div>
       </div>
@@ -135,11 +167,43 @@
         </label>
         <span class="tag" id="dt-auto-state">连续检测关闭</span>
       </div>
+
+      <section class="dt-result hidden" id="dt-result">
+        <div class="dt-result-head">
+          <span class="dt-result-title">检测结果视频 · 逐帧核对</span>
+          <span class="tag" id="dt-result-state">0 帧</span>
+          <div class="spacer"></div>
+          <button class="btn sm" id="dt-result-prev" type="button" title="上一帧">◀|</button>
+          <button class="btn sm" id="dt-result-play" type="button">播放</button>
+          <button class="btn sm" id="dt-result-next" type="button" title="下一帧">|▶</button>
+          <button class="btn sm ghost" id="dt-result-close" type="button">收起</button>
+        </div>
+        <div class="dt-result-body">
+          <div class="dt-result-canvas-wrap">
+            <canvas id="dt-result-canvas"></canvas>
+            <div class="dt-result-badge" id="dt-result-hold">逐帧结果</div>
+          </div>
+          <aside class="dt-result-side">
+            <dl class="dt-result-kv">
+              <dt>当前帧</dt><dd id="dt-result-frame">#0</dd>
+              <dt>时间</dt><dd id="dt-result-time">00:00.000</dd>
+              <dt>本帧目标</dt><dd id="dt-result-hits">0</dd>
+              <dt>已检测帧</dt><dd id="dt-result-keys">0</dd>
+            </dl>
+            <p class="dt-result-note">逐帧核对：有结果的帧显示实线框；没有结果的帧沿用最近一次检测，显示虚线框。</p>
+            <div class="dt-result-legend">
+              <span><i class="m"></i>模型</span>
+              <span><i class="h"></i>手工</span>
+              <span><i class="a"></i>AI</span>
+            </div>
+          </aside>
+        </div>
+      </section>
     </main>
 
     <!-- ================= 右：坐标与 AI ================= -->
     <aside class="dt-side right">
-      <section class="dt-sec grow">
+      <section class="dt-sec grow sec-coord">
         <div class="dt-sec-h">
           <span>坐标 / 属性</span>
           <div class="spacer"></div>
@@ -148,7 +212,7 @@
         <div class="dt-detail" id="dt-detail"></div>
       </section>
 
-      <section class="dt-sec dt-ai-sec">
+      <section class="dt-sec dt-ai-sec sec-ai">
         <div class="dt-sec-h">
           <span>AI 辅助框选</span>
           <span class="tag ai">可接入</span>
@@ -160,14 +224,31 @@
     </aside>
 
   </div>
+
+  <footer class="statusbar dt-status">
+    <span class="st-live mono"><i aria-hidden="true"></i>LIVE</span>
+    <div class="st-marquee" aria-hidden="true">
+      <div class="st-track">
+        <span>IMAGE / VIDEO · ROTATED BOX</span><b>◆</b>
+        <span>4 POINTS · CENTER · W/H · ANGLE</span><b>◆</b>
+        <span>SHIP-ANNOTATION-SET / 1.0</span><b>◆</b>
+        <span>MODEL · MANUAL · AI CANDIDATES</span><b>◆</b>
+        <span>MOCK / HTTP · 逐帧核对</span><b>◆</b>
+        <span>SEA TEXTURE · SHAGIL KANNUR / CC BY-SA</span><b>◆</b>
+      </div>
+    </div>
+    <span class="st-right mono"><span id="status-clock">--:--:--</span><span>LOCAL · 127.0.0.1</span></span>
+    <span class="sr-only">背景海面：Deep Blue Sea by Shagil Kannur，CC BY-SA 4.0，via Wikimedia Commons。</span>
+  </footer>
 </div>
 
 <div class="toast-host" id="dt-toasts"></div>
 
-<script src="detect-config.js?v=1"></script>
+<script src="detect-config.js?v=2"></script>
 <script src="api/geom.js"></script>
 <script src="api/detect-mock.js?v=1"></script>
 <script src="api/detect-api.js?v=1"></script>
-<script src="detect.js?v=1"></script>
+<script src="detect.js?v=24"></script>
+<script src="motion.js?v=4"></script>
 </body>
 </html>

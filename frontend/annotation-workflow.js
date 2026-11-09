@@ -4,7 +4,7 @@ const annotationLabels = {
   paused: '已暂停', returned: '已退回', release_requested: '申请交还',
   submitted: '待审核', signed: '已签收'
 };
-const workflow = { items: [], current: null, task: null, navigation: 0 };
+const workflow = { items: [], current: null, task: null, navigation: 0, ai: null };
 const lead = () => state.user?.role === '项目负责人';
 const managed = () => workflow.task?.task_id === state.task?.id && Boolean(workflow.task);
 const writable = () => !state.viewingVersion && (!managed() || workflow.task.status === 'active' && !lead());
@@ -50,6 +50,7 @@ async function annotationPage(name) {
     if (button.dataset.annotation === name) button.setAttribute('aria-current', 'page');
     else button.removeAttribute('aria-current');
   });
+  if (name === 'tools') return showProjectTools();
   annotationPanel('正在加载任务', '读取项目任务与当前进度。');
   try {
     await loadAnnotations();
@@ -129,6 +130,42 @@ async function annotationPage(name) {
   }
 }
 
+function aiAvailability() {
+  const status = workflow.ai;
+  if (!status) return '正在检查本机 SAM 2';
+  if (!status.available) return 'SAM 2 不可用，可继续手调';
+  if (status.sam2 === 'loading') return 'SAM 2 加载中';
+  return status.sam2 === 'ready' ? 'SAM 2 已就绪' : 'SAM 2 首次使用时加载';
+}
+
+async function refreshAiAvailability() {
+  try { workflow.ai = await API.annotationAiStatus(state.project.id); }
+  catch (_) { workflow.ai = { available: false }; }
+  if (state.view === 'workbench') updateDirty();
+}
+
+async function showProjectTools() {
+  const host = annotationPanel('项目工具', '管理本机模型连接，或打开独立的图片和视频检测。');
+  const status = document.createElement('p');
+  status.setAttribute('role','status');
+  const link = document.createElement('a');
+  link.href = 'detect.html';
+  link.className = 'btn';
+  link.textContent = '打开独立智能检测';
+  host.append(status, annotationButton('重测 SAM 2', async () => {
+    status.textContent = '正在加载本机模型…';
+    try { workflow.ai = await API.probeAnnotationAi(state.project.id); }
+    catch (error) { status.textContent = error.message; return; }
+    update();
+  }), link);
+  function update() {
+    status.textContent = aiAvailability() + ' / ' + (workflow.ai?.vlm === 'local_configured'
+      ? '本机 VLM 已配置，仅判断是否为船' : '本机 VLM 未配置，候选由人工判断');
+  }
+  await refreshAiAvailability();
+  update();
+}
+
 function workflowDialog(title, fields, submit) {
   const dialog = document.createElement('dialog');
   dialog.className = 'annotation-dialog';
@@ -197,6 +234,7 @@ async function enterAnnotation(item) {
   summary.textContent = item.width + ' × ' + item.height + ' px / ' + item.final_count +
     ' 个模型框 / ' + item.low_pending + ' 个低置信度待处理。';
   host.append(summary);
+  if (item.final_count === 0) host.append('模型未检出船舶，请检查整张影像是否有漏检。');
   const instructions = document.createElement('p');
   instructions.textContent = '检查整张影像。补画漏检、调整错位、删除误检。低置信度框逐个处理，高置信度框可在整图检查后批量确认。';
   host.append(instructions);
@@ -234,7 +272,9 @@ async function openAnnotation(item) {
   setAnnotationFilter(writable() ? 'low' : 'all');
   if (!writable() && item.version_id)
     state.viewingVersion = await API.getVersion(item.version_id, item.task_id);
+  workflow.ai = null;
   switchView('workbench');
+  refreshAiAvailability();
   if (item.target_id != null) requestAnimationFrame(() => centerOn(item.target_id));
 }
 
@@ -251,7 +291,17 @@ function renderAnnotationToolbar() {
   $('#btn-save').hidden = managed();
   for (const id of ['btn-confirm','btn-delete','btn-undo','btn-redo'])
     $('#' + id).disabled = !writable();
-  $$('#tool-group button').forEach(button => { button.disabled = !writable() && button.dataset.tool !== 'select'; });
+  $$('#tool-group button[data-tool]').forEach(button => {
+    button.disabled = !writable() && button.dataset.tool !== 'select' ||
+      managed() && button.dataset.tool === 'ai' && (!workflow.ai?.available || workflow.ai.sam2 === 'loading' ||
+      ['requesting','preview'].includes(state.ai.status));
+  });
+  const refine = $('#ai-refine');
+  refine.hidden = !managed();
+  refine.disabled = !writable() || !selected() || !workflow.ai?.available ||
+    workflow.ai.sam2 === 'loading' || ['requesting','preview'].includes(state.ai.status);
+  $('#annotation-ai-status').textContent = managed() && writable()
+    ? state.ai.status === 'requesting' ? '正在运行本机 SAM 2…' : aiAvailability() : '';
   $('#btn-exit-readonly').hidden = managed() && !writable();
   if (!managed()) return;
   const item = workflow.task;

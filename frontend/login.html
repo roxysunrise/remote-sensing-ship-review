@@ -3,11 +3,15 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#0a1218">
+<meta name="color-scheme" content="light">
 <title>登录 · 遥感影像船舶检测与复核</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23ff6b57'/%3E%3Cpath d='M6 20h20l-4 6H10z' fill='%23071320'/%3E%3Crect x='14' y='7' width='4' height='12' fill='%23071320'/%3E%3C/svg%3E">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%232f5bff'/%3E%3Cpath d='M6 20h20l-4 6H10z' fill='%23ffffff'/%3E%3Crect x='14' y='7' width='4' height='12' fill='%23ffffff'/%3E%3C/svg%3E">
 <link rel="preload" as="image" href="assets/harbor-login.webp">
-<link rel="stylesheet" href="login.css">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="login.css?v=20">
 </head>
 <body>
 
@@ -18,12 +22,23 @@
 <main class="split">
 
   <section class="intro">
+    <div class="intro-brand">
+      <span class="mark" aria-hidden="true">船</span>
+      <span class="brand-text">遥感船舶检测与复核<small>ship-detection / 0.2</small></span>
+    </div>
+
     <div class="intro-copy">
-      <h1>让每一处检测<br><span>都有据可查</span></h1>
+      <p class="kicker">// HARBOR REMOTE SENSING</p>
+      <h1>让每一处检测<br>都有据可查。</h1>
       <p class="lede">
         面向港口巡查的影像分析工作台。大图切片推理、旋转框人工复核、
         版本留痕与区域统计，在同一条流程里完成。
       </p>
+    </div>
+
+    <div class="intro-foot">
+      <span>港口巡查 · 受控接入 · 无公开注册</span>
+      <span>© 2026 SHIP REVIEW</span>
     </div>
   </section>
 
@@ -31,12 +46,8 @@
     <div class="channels" aria-hidden="true"><i></i><i></i><i></i></div>
 
     <div class="panel-inner">
-      <div class="brand">
-        <span class="mark" aria-hidden="true">船</span>
-        <span class="brand-text">遥感船舶检测与复核<small>ship-detection / 0.2</small></span>
-      </div>
-
       <header class="panel-head">
+        <p class="panel-kicker">// SECURE ACCESS</p>
         <h2 id="login-title">登录工作台</h2>
         <p class="hint">使用管理员分配的账号进入项目空间。</p>
       </header>
@@ -133,6 +144,6 @@
 <script src="config.js"></script>
 <script src="auth-config.js"></script>
 <script src="auth-session.js"></script>
-<script src="login.js"></script>
+<script src="login.js?v=2"></script>
 </body>
 </html>

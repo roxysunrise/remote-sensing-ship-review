@@ -33,3 +33,9 @@ GET /tasks/{task_id}/draft 返回 annotation_revision，未发布任务为 null�
 正常示例：POST /tasks/tsk_example/annotation/submit，JSON 为 {"revision":7}，响应包含 {"status":"submitted","version_id":"v1","revision":8}。
 
 冲突示例：使用过期修订号更新草稿返回 409 STALE_DRAFT；未处理完待确认目标返回 409 ANNOTATION_PENDING；已经领取其他任务时返回 409 ANNOTATION_BUSY。收到冲突后重新读取任务和草稿。
+
+## 本机粗框提示
+
+GET /projects/{project_id}/annotation-ai 查询 SAM 2 状态和本机 VLM 是否已配置。POST /projects/{project_id}/annotation-ai/probe 由主管主动加载模型。
+
+现有 POST /images/{image_id}/ai-candidates 增加 engine=sam2、task_id、mode=box 或 refine，以及原图像素 box=[x0,y0,x1,y1]。必须是当前标注者的进行中任务。返回 source=sam2 和四点 polygon。SAM2_UNAVAILABLE 表示模型不可用，NO_CANDIDATE 表示本次未找到可用轮廓或本机 VLM 否决。采纳沿用原有候选写入和草稿修订号。SAM 2 提供几何，VLM 只做语义判断。

@@ -307,6 +307,9 @@
     const token = S.token();
     if (!session && !token) return;
 
+    // 工作台 mock 演示令牌不属于真实后端；本页只负责真实登录，直接显示表单。
+    if (String(token).indexOf('mock-token-') === 0) return;
+
     if (!token) {
       S.clear();
       return;

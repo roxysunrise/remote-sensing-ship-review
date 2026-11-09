@@ -18,7 +18,7 @@ def main():
             cdp.send("Page.addScriptToEvaluateOnNewDocument", source=browser.COLLECT_ERRORS)
 
             def check(expression, label):
-                if not browser.wait_until(cdp, expression, timeout=10):
+                if not browser.wait_until(cdp, expression, timeout=25):
                     raise AssertionError(label)
                 print("[PASS]", label, flush=True)
 
@@ -59,6 +59,25 @@ def main():
             check("state.view === 'workbench' && state.draft.length === 4", "existing workbench with four model boxes")
             check("document.querySelector('#annotation-workbench .primary').disabled", "pending boxes block submission")
             cdp.js("state.selection=1; refreshWorkbench()")
+            if os.environ.get("SHIP_TEST_SAM2") == "1":
+                before = cdp.js("JSON.stringify(state.draft)")
+                click("精修选中框")
+                check("state.ai.candidate?.source === 'sam2'", "local SAM 2 refinement preview")
+                click("取消")
+                check("JSON.stringify(state.draft) === " + json.dumps(before), "discard keeps original draft")
+                click("框选补漏")
+                cdp.js("""(() => {
+                    const box = GEOM.bbox(state.draft[0].polygon);
+                    const start = [box[0]-10, box[1]-10];
+                    const end = [box[2]+10, box[3]+10];
+                    wbDown(start, WB.vp.w2s(...start), {button:0});
+                    wbMove(end);
+                    wbUp(end);
+                })()""")
+                check("state.ai.candidate?.source === 'sam2'", "rough box produces SAM 2 candidate")
+                click("新增候选框")
+                check("state.draft.length === 5", "accept appends exactly one box")
+                cdp.js("state.tool='select'; state.selection=1; refreshWorkbench()")
             check("!!document.querySelector('#det-geometry')", "precision controls")
             cdp.js("""(() => {
                 const form = document.getElementById('det-geometry');

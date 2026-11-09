@@ -20,7 +20,7 @@ from algorithm.errors import DetectionError
 from algorithm.ship_detector import ShipDetector
 
 from . import (annotation, ai_assist, ai_planner, config, db, detector, errors, geometry, imaging, security,
-               stats, storage, tiles)
+               sam2_assist, stats, storage, tiles)
 
 router = APIRouter()
 
@@ -1398,6 +1398,18 @@ def _candidate_polygon(image_row, body: dict, state: dict | None = None) -> dict
         image.close()
 
 
+@router.get("/projects/{project_id}/annotation-ai")
+def annotation_ai_status(project_id: str, state: dict = State) -> dict:
+    _member(project_id, state)
+    return sam2_assist.status()
+
+
+@router.post("/projects/{project_id}/annotation-ai/probe")
+def probe_annotation_ai(project_id: str, state: dict = State) -> dict:
+    _member(project_id, state, owner_only=True)
+    return sam2_assist.probe()
+
+
 @router.post("/images/{image_id}/ai-candidates")
 def create_candidate(image_id: str, body: dict = Body(...), state: dict = State) -> dict:
     image = db.one("SELECT * FROM images WHERE id=?", (image_id,))
@@ -1407,7 +1419,21 @@ def create_candidate(image_id: str, body: dict = Body(...), state: dict = State)
     if image["status"] != "ready":
         raise errors.conflict("IMAGE_NOT_READY", "影像尚未通过验证")
 
-    proposal = _candidate_polygon(image, body, state)
+    if body.get("engine") == "sam2":
+        task = _task_or_404(str(body.get("task_id") or ""), state)
+        if task["image_id"] != image_id:
+            raise errors.invalid("INVALID_ARGUMENT", "任务和影像不匹配")
+        row = annotation.get(task["id"])
+        if not row or row["assignee"] != state["user"]["id"] or row["status"] != "active":
+            raise errors.conflict("ANNOTATION_READ_ONLY", "请先开始标注再请求 AI")
+        from PIL import Image
+        gate = ai_planner.make_gate(project_id=image["project_id"], user_id=state["user"]["id"],
+                                    local_only=True) if sam2_assist.local_vlm() else None
+        with Image.open(storage.blob_path(image["stored_name"])) as source:
+            with source.convert("RGB") as raster:
+                proposal = sam2_assist.propose(raster, body.get("box"), gate)
+    else:
+        proposal = _candidate_polygon(image, body, state)
     polygon = proposal["polygon"]
     sides = [math.dist(polygon[i], polygon[(i + 1) % 4]) for i in range(4)]
     length_px, width_px = max(sides), min(sides)   # 取四条边，不能只取对边
@@ -1456,6 +1482,8 @@ def accept_candidate(candidate_id: str, body: dict = Body(default_factory=dict),
             raise errors.conflict("NO_TASK", "该影像还没有已完成的任务，无法写入候选")
 
     annotation_row = annotation.guard(task["id"], state, body)
+    if annotation_row and candidate["user_id"] != state["user"]["id"]:
+        raise errors.forbidden("不能采纳其他用户的候选")
     replace_id = body.get("replace_id")
     if replace_id is not None:
         if not annotation_row or type(replace_id) is not int:

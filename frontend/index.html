@@ -3,99 +3,134 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0a1218">
 <title>遥感影像船舶检测与人机协同复核系统</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%2338b2a3'/%3E%3Cpath d='M6 20h20l-4 6H10z' fill='%230a0f14'/%3E%3Crect x='14' y='7' width='4' height='12' fill='%230a0f14'/%3E%3C/svg%3E">
-<link rel="stylesheet" href="styles.css?v=2">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%232f5bff'/%3E%3Cpath d='M6 20h20l-4 6H10z' fill='%23fff'/%3E%3Crect x='14' y='7' width='4' height='12' fill='%23fff'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css?v=55">
 </head>
 <body>
 
 <!-- ============ 登录（受控开户，无公开注册） ============ -->
 <div class="login-gate" id="login">
-  <form class="login-card" id="login-form">
-    <h1>遥感影像船舶检测与复核</h1>
-    <p class="sub">面向港口巡查的影像分析工作台 · 受控开户</p>
+  <div class="gate-scene" aria-hidden="true"></div>
+  <div class="gate-top">
+    <span class="brand-mark" aria-hidden="true">船</span>
+    <span class="brand-name">遥感船舶检测与复核<small>SHIP-DETECTION / 0.2</small></span>
+    <span class="gate-top-meta mono">港口巡查 · 受控接入</span>
+    <span class="topbar-strip" aria-hidden="true"><i></i><i></i><i></i></span>
+  </div>
 
-    <div class="field">
-      <label for="login-user">账号</label>
-      <select id="login-user">
-        <option value="lin.analyst">lin.analyst — 项目分析员</option>
-        <option value="roxysunrise">roxysunrise — 项目负责人</option>
-      </select>
-    </div>
-    <div class="field">
-      <label for="login-pass">密码</label>
-      <input id="login-pass" type="password" value="demo" autocomplete="current-password">
-    </div>
-    <div class="field">
-      <label for="login-project">项目空间</label>
-      <select id="login-project">
-        <option value="harbor-a">港口巡查 A 区</option>
-        <option value="harbor-b">港口巡查 B 区（无权限）</option>
-      </select>
+  <div class="gate-grid">
+    <div class="gate-hero">
+      <p class="kicker mono">// HARBOR REMOTE SENSING</p>
+      <h1>让每一处检测<br>都有据可查。</h1>
+      <p class="lede">遥感船舶检测与复核系统：面向港口巡查的影像分析工作台。大图切片推理、旋转框人工复核与版本留痕，在同一条流程里完成。</p>
     </div>
 
-    <button class="btn primary" type="submit" style="width:100%;margin-top:6px">登录</button>
+    <form class="login-card" id="login-form">
+      <div class="login-card-h">
+        <span class="mono">// ACCESS</span>
+        <span class="mono dim">受控开户</span>
+      </div>
 
-    <div class="login-note">
-      首版采用受控开户，不提供公开注册、短信或邮件。选择“B 区”可验证<b>跨项目隔离</b>：服务端会拒绝非成员项目。
-    </div>
-  </form>
+      <h2 class="gate-card-title">进入项目空间</h2>
+      <p class="gate-card-sub">使用管理员分配的账号，受控接入。</p>
+
+      <div class="field">
+        <label for="login-user">账号</label>
+        <select id="login-user">
+          <option value="lin.analyst">lin.analyst — 项目分析员</option>
+          <option value="roxysunrise">roxysunrise — 项目负责人</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="login-pass">密码</label>
+        <input id="login-pass" type="password" value="demo" autocomplete="current-password">
+      </div>
+      <div class="field">
+        <label for="login-project">项目空间</label>
+        <select id="login-project">
+          <option value="harbor-a">港口巡查 A 区</option>
+          <option value="harbor-b">港口巡查 B 区（无权限）</option>
+        </select>
+      </div>
+
+      <button class="btn primary lg" type="submit">登录工作台</button>
+
+      <div class="login-note">
+        首版采用受控开户，不提供公开注册、短信或邮件。选择“B 区”可验证<b>跨项目隔离</b>：服务端会拒绝非成员项目。
+      </div>
+    </form>
+  </div>
 </div>
 
 <!-- ============ 应用 ============ -->
 <div class="app hidden" id="app">
 
   <header class="topbar">
-    <div class="brand">
-      <div class="mark">船</div>
-      <div>
-        遥感船舶检测与复核
-        <small>ship-detection / 0.2 · 人机协同</small>
-      </div>
-    </div>
+    <a class="brand" href="index.html" title="遥感影像船舶检测与人机协同复核">
+      <span class="brand-mark" aria-hidden="true">船</span>
+      <span class="brand-name">遥感船舶检测与复核<small>SHIP-DETECTION / 0.2</small></span>
+    </a>
+
     <div class="ctx">
-      <span class="chip">项目 <b id="ctx-project">—</b></span>
-      <span class="chip">角色 <b id="ctx-role">—</b></span>
-      <span class="chip" id="ctx-model">模型 <b>YOLOv8l-OBB</b></span>
-      <span class="chip">接口 <b id="ctx-api">—</b></span>
+      <span class="ctx-item"><i>项目</i><b id="ctx-project">—</b></span>
+      <span class="ctx-item"><i>角色</i><b id="ctx-role">—</b></span>
+      <span class="ctx-item"><i>接口</i><b id="ctx-api">—</b></span>
     </div>
+
     <div class="top-right">
       <span class="badge" id="mode-badge" title="数据来源：真实后端 / 浏览器内模拟">…</span>
-      <span class="chip" id="ctx-user">—</span>
+      <span class="who mono" id="ctx-user">—</span>
       <button class="btn ghost sm" id="btn-logout">退出</button>
+    <span class="topbar-strip" aria-hidden="true"><i></i><i></i><i></i></span>
     </div>
   </header>
 
-  <div class="shell">
-    <nav class="rail" id="rail">
-      <button type="button" data-annotation="hall" hidden>任务大厅</button>
-      <button type="button" data-annotation="mine" hidden>我的任务</button>
-      <button type="button" data-annotation="manage" hidden>项目任务</button>
-      <button type="button" data-annotation="approval" hidden>待审核</button>
-      <button data-view="project"><span class="ic">◱</span>项目</button>
-      <button data-view="upload"><span class="ic">↑</span>上传</button>
-      <button data-view="task"><span class="ic">▶</span>任务</button>
-      <button data-view="workbench"><span class="ic">▦</span>工作台</button>
-      <a class="rail-link" href="detect.html" title="图片 / 视频检测、坐标查看与 AI 辅助框选"><span class="ic">◎</span>智能检测</a>
-      <button data-view="review"><span class="ic">◐</span>疑难复核</button>
-      <button data-view="stats"><span class="ic">∑</span>区域统计</button>
-      <button data-view="history"><span class="ic">⟲</span>修订历史</button>
-      <button data-view="export"><span class="ic">↧</span>报告导出</button>
-    </nav>
+  <nav class="tabs" id="rail" aria-label="工作区">
+    <span class="tab-ink" aria-hidden="true"></span>
+      <button type="button" data-annotation="hall" hidden><span>任务大厅</span></button>
+      <button type="button" data-annotation="mine" hidden><span>我的任务</span></button>
+      <button type="button" data-annotation="manage" hidden><span>项目任务</span></button>
+      <button type="button" data-annotation="approval" hidden><span>待审核</span></button>
+    <button type="button" data-annotation="tools" hidden><span>项目工具</span></button>
+    <button type="button" data-view="project"><i>01</i><span>项目</span></button>
+    <button type="button" data-view="upload"><i>02</i><span>上传</span></button>
+    <button type="button" data-view="task"><i>03</i><span>任务</span></button>
+    <button type="button" data-view="workbench"><i>04</i><span>工作台</span></button>
+    <a class="rail-link" href="detect.html" title="图片 / 视频检测、坐标查看与 AI 辅助框选"><i>05</i><span>智能检测</span></a>
+    <button type="button" data-view="review"><i>06</i><span>疑难复核</span></button>
+    <button type="button" data-view="stats"><i>07</i><span>区域统计</span></button>
+    <button type="button" data-view="history"><i>08</i><span>修订历史</span></button>
+    <button type="button" data-view="export"><i>09</i><span>报告导出</span></button>
+    <span class="tabs-end mono">A 区 / 港口巡查</span>
+  </nav>
 
+  <div class="shell">
     <main>
+
+      <h1 class="sr-only">遥感影像船舶检测与人机协同复核工作台</h1>
 
       <!-- ---------- 项目 ---------- -->
       <button class="btn sm annotation-back" type="button" id="annotation-back" hidden>返回当前工作台</button>
-      <section class="view" id="view-annotation"><div class="pane" id="annotation-content"></div></section>
-      <section class="view" id="view-project">
+      <section class="view light" id="view-annotation"><div class="pane" id="annotation-content"></div></section>
+      <section class="view light" id="view-project">
         <div class="pad">
           <div class="view-head">
-            <h2>项目空间</h2>
-            <p>所有影像、任务、结果与报告均绑定项目，服务端逐请求校验成员关系</p>
+            <div class="vh-main">
+              <p class="kicker mono">// 01 — PROJECT</p>
+              <h2>项目空间</h2>
+            </div>
+            <div class="vh-side">
+              <p>所有影像、任务、结果与报告均绑定项目，服务端逐请求校验成员关系。</p>
+              <div class="vh-meta mono"><span>PRJ-A-0271</span><span>港口巡查 A 区</span><span>受控访问</span></div>
+            </div>
           </div>
 
-          <div class="grid-2" style="margin-top:14px">
+          <div class="grid-2">
             <div class="card">
               <h3>当前项目</h3>
               <dl class="kv">
@@ -106,12 +141,11 @@
                 <dt>检测任务</dt><dd id="pj-task">未创建</dd>
                 <dt>存储</dt><dd>私有对象存储 · 项目内可见</dd>
               </dl>
-              <div class="hr"></div>
-              <h3>项目成员</h3>
-              <div id="pj-members"></div>
             </div>
 
             <div class="card">
+              <h3>项目成员</h3>
+              <div id="pj-members"></div>
               <h3>权限边界</h3>
               <p class="muted" style="font-size:12.5px;margin-top:0">
                 前端隐藏按钮不能替代服务端校验。以下项目在真实实现中必须逐请求检查：
@@ -120,15 +154,15 @@
               <div class="check done"><span class="box">✓</span><span>上传会话的创建、续传、取消与完成</span></div>
               <div class="check done"><span class="box">✓</span><span>修订保存与版本切换</span></div>
               <div class="check done"><span class="box">✓</span><span>区域统计与报告下载</span></div>
-              <div class="check"><span class="box">○</span><span>短期签名链接的即时撤权（需鉴权代理）</span></div>
-              <div class="hr"></div>
-              <div class="note">
-                项目选择项来自账号实际成员关系，<b>不能由浏览器提交任意项目编号获得权限</b>。跨项目默认不可见。
-              </div>
+              <div class="check"><span class="box">—</span><span>短期签名链接的即时撤权（需鉴权代理）</span></div>
             </div>
           </div>
 
-          <div class="grid-3" style="margin-top:14px">
+          <div class="note" style="margin-top:20px">
+            项目选择项来自账号实际成员关系，<b>不能由浏览器提交任意项目编号获得权限</b>。跨项目默认不可见。
+          </div>
+
+          <div class="grid-3" style="margin-top:20px">
             <div class="card">
               <h3>项目影像 <span class="tag" id="pj-image-count">服务端列表</span></h3>
               <div id="pj-image-list" class="lib" style="font-size:12px">
@@ -137,7 +171,7 @@
               <div class="hr"></div>
               <div class="mono dim" style="font-size:11px">sha256 <span id="pj-sha">—</span></div>
             </div>
-            <div class="card">
+            <div class="card ink">
               <h3>检测结果 <span class="tag model">模型原始</span></h3>
               <div class="stat-line" style="margin-bottom:0">
                 <div class="s"><b id="pj-count">—</b><span>模型候选</span></div>
@@ -150,9 +184,9 @@
                 <div class="dim" style="padding:6px 0">加载中…</div>
               </div>
             </div>
-            <div class="card">
+            <div class="card signal">
               <h3>下一步</h3>
-              <p class="muted" style="font-size:12.5px;margin:0 0 12px">上传就绪后创建检测任务，再进入工作台复核。</p>
+              <p class="muted" style="font-size:13px;margin:0 0 16px">上传就绪后创建检测任务，再进入工作台复核。</p>
               <button class="btn primary sm" data-goto="upload">前往上传</button>
             </div>
           </div>
@@ -160,19 +194,26 @@
       </section>
 
       <!-- ---------- 上传 ---------- -->
-      <section class="view" id="view-upload">
+      <section class="view light" id="view-upload">
         <div class="pad">
           <div class="view-head">
-            <h2>可靠上传</h2>
-            <p>传输完成 ≠ 可检测：分片传输、完整性校验、图像验证、预览生成是四个独立状态</p>
+            <div class="vh-main">
+              <p class="kicker mono">// 02 — INGEST</p>
+              <h2>可靠上传</h2>
+            </div>
+            <div class="vh-side">
+              <p>传输完成 ≠ 可检测：分片传输、完整性校验、图像验证、预览生成是四个独立状态。</p>
+              <div class="vh-meta mono"><span>1 MiB / CHUNK</span><span>SHA-256</span><span>RESUMABLE</span></div>
+            </div>
           </div>
 
-          <div class="grid-2" style="margin-top:14px;align-items:start">
+          <div class="grid-2" style="align-items:start">
             <div class="card">
+              <h3>影像源</h3>
               <div class="dropzone" id="dropzone">
                 <div class="big">拖入影像，或点击选择</div>
-                <div class="muted" style="font-size:12.5px">首版支持可解码的 RGB PNG / JPEG，保留原始文件</div>
-                <div style="margin-top:14px">
+                <div class="muted" style="font-size:13px">首版支持可解码的 RGB PNG / JPEG，保留原始文件</div>
+                <div style="margin-top:18px">
                   <button class="btn sm" id="btn-pick-demo" type="button">使用示例影像 harbor.png</button>
                 </div>
                 <input type="file" id="file-input" accept=".png,.jpg,.jpeg" class="hidden">
@@ -227,20 +268,26 @@
       </section>
 
       <!-- ---------- 任务 ---------- -->
-      <section class="view" id="view-task">
+      <section class="view light" id="view-task">
         <div class="pad">
           <div class="view-head">
-            <h2>检测任务</h2>
-            <p>异步大图检测与渐进反馈：进度来自真实切片记录，临时计数在合并完成后才成为最终值</p>
+            <div class="vh-main">
+              <p class="kicker mono">// 03 — DETECTION</p>
+              <h2>检测任务</h2>
+            </div>
+            <div class="vh-side">
+              <p>异步大图检测与渐进反馈：进度来自真实切片记录，临时计数在合并完成后才成为最终值。</p>
+              <div class="vh-meta mono"><span>T-0271</span><span>12 TILES</span><span>NMS 0.10</span></div>
+            </div>
           </div>
 
-          <div class="grid-2" style="margin-top:14px;align-items:start">
+          <div class="grid-2" style="align-items:start">
             <div class="card">
-              <div class="row" style="margin-bottom:12px">
+              <div class="row" style="margin-bottom:16px">
                 <h3 style="margin:0">任务 #T-0271</h3>
                 <span class="tag" id="task-state">未创建</span>
                 <div class="spacer"></div>
-                <span class="mono muted" style="font-size:11.5px" id="task-attempt">第 1 次尝试</span>
+                <span class="mono muted" id="task-attempt">第 1 次尝试</span>
               </div>
 
               <div class="stat-line">
@@ -278,7 +325,7 @@
       </section>
 
       <!-- ---------- 工作台 ---------- -->
-      <section class="view" id="view-workbench">
+      <section class="view dark" id="view-workbench">
         <div class="wb">
           <div class="banner hidden" id="wb-banner">
             <span>正在查看历史版本 <b id="wb-banner-id">v0</b>（只读，不会修改任何数据）</span>
@@ -290,7 +337,9 @@
             <div class="tool-group" id="tool-group">
               <button class="tool on" data-tool="select">选择</button>
               <button class="tool" data-tool="add">新增框</button>
-              <button class="tool" data-tool="ai">AI 补框</button>
+              <button class="tool" data-tool="ai">框选补漏</button>
+              <button class="tool" type="button" id="ai-refine">精修选中框</button>
+              <span class="dim" id="annotation-ai-status" role="status"></span>
             </div>
             <div class="sep"></div>
             <button class="btn sm" id="btn-confirm">确认选中</button>
@@ -330,6 +379,10 @@
 
             <div class="canvas-wrap" id="wb-wrap">
               <canvas id="wb-canvas"></canvas>
+              <div class="stage-meta">
+                <span class="mono">HARBOR.PNG · 2305 × 1537</span>
+                <span class="mono">SITE A / 港口巡查 A 区</span>
+              </div>
               <div class="overlay-hint" id="wb-hint">滚轮缩放 · 拖动平移 · 点击选择</div>
               <div class="zoom-hud"><span id="wb-zoom">100%</span></div>
             </div>
@@ -349,14 +402,20 @@
       </section>
 
       <!-- ---------- 疑难复核 ---------- -->
-      <section class="view" id="view-review">
+      <section class="view light" id="view-review">
         <div class="pad">
           <div class="view-head">
-            <h2>疑难复核队列</h2>
-            <p>按可解释的原因排序，不是“检测正确概率”；确认单个目标不等于整图审核完成</p>
+            <div class="vh-main">
+              <p class="kicker mono">// 06 — REVIEW QUEUE</p>
+              <h2>疑难复核</h2>
+            </div>
+            <div class="vh-side">
+              <p>按可解释的原因排序，不是“检测正确概率”；确认单个目标不等于整图审核完成。</p>
+              <div class="vh-meta mono"><span>4 REASONS</span><span>GEOMETRY-BASED</span></div>
+            </div>
           </div>
 
-          <div class="grid-2" style="margin-top:14px;align-items:start">
+          <div class="grid-2" style="align-items:start">
             <div>
               <div class="row" style="margin-bottom:10px">
                 <span class="muted" style="font-size:12.5px">待复核 <b id="q-count">0</b> 项</span>
@@ -368,26 +427,27 @@
 
             <div class="card">
               <h3>排序依据</h3>
-              <div class="check"><span class="box">•</span><span><b>模型把握较低</b>：置信度低于 0.45</span></div>
-              <div class="check"><span class="box">•</span><span><b>靠近处理边界</b>：框到所属切片边缘 &lt; 12 px</span></div>
-              <div class="check"><span class="box">•</span><span><b>靠近影像边缘</b>：框到影像边界 &lt; 20 px</span></div>
-              <div class="check"><span class="box">•</span><span><b>疑似重复检出</b>：与另一框互相包含中心点，说明 NMS 未合并（碎片）</span></div>
-              <div class="check"><span class="box">•</span><span><b>空区域抽样</b>：512 网格内无任何检测</span></div>
-              <div class="hr"></div>
-              <p class="muted" style="font-size:12px;margin:0">
+              <div class="reasons">
+                <div class="reason"><b>模型把握较低</b><span>置信度低于 0.45</span></div>
+                <div class="reason"><b>靠近处理边界</b><span>框到所属切片边缘 &lt; 12 px</span></div>
+                <div class="reason"><b>靠近影像边缘</b><span>框到影像边界 &lt; 20 px</span></div>
+                <div class="reason"><b>疑似重复检出</b><span>与另一框互相包含中心点，说明 NMS 未合并（碎片）</span></div>
+                <div class="reason"><b>空区域抽样</b><span>512 网格内无任何检测</span></div>
+              </div>
+              <p class="muted" style="font-size:12.5px;margin:18px 0 0">
                 前四条由真实几何计算得出（复用多边形 IoU 判定），空区域抽样基于切片候选数。
                 排序分数只用于安排复核顺序，<b>不能称为检测正确概率</b>。
               </p>
               <div class="hr"></div>
               <h3>抽样检查建议</h3>
-              <div id="q-samples" class="mono" style="font-size:11.5px;color:var(--tx-2);line-height:1.8"></div>
+              <div id="q-samples" class="mono" style="font-size:11.5px;color:var(--tx-2);line-height:1.9"></div>
             </div>
           </div>
         </div>
       </section>
 
       <!-- ---------- 统计 ---------- -->
-      <section class="view" id="view-stats">
+      <section class="view dark" id="view-stats">
         <div class="wb">
           <div class="wb-bar">
             <div class="tool-group">
@@ -398,10 +458,15 @@
             <button class="btn sm" id="btn-region-clear">清除区域</button>
             <button class="btn sm" id="btn-region-close">闭合区域</button>
             <div class="spacer"></div>
-            <span class="muted" style="font-size:11.5px">点击添加顶点，双击或“闭合区域”完成</span>          </div>
+            <span class="mono muted">点击添加顶点 · 双击闭合</span>
+          </div>
           <div class="wb-body">
             <div class="canvas-wrap" id="st-wrap">
               <canvas id="st-canvas"></canvas>
+              <div class="stage-meta">
+                <span class="mono">REGION COUNT / 中心点规则</span>
+                <span class="mono">SITE A</span>
+              </div>
               <div class="overlay-hint">计数规则：目标中心点落入区域</div>
             </div>
             <aside class="wb-side right" style="width:330px;flex-basis:330px">
@@ -430,13 +495,19 @@
       </section>
 
       <!-- ---------- 历史 ---------- -->
-      <section class="view" id="view-history">
+      <section class="view light" id="view-history">
         <div class="pad">
           <div class="view-head">
-            <h2>修订历史</h2>
-            <p>模型原始结果不可变；人工修订以追加版本记录，历史版本只读</p>
+            <div class="vh-main">
+              <p class="kicker mono">// 08 — VERSIONS</p>
+              <h2>修订历史</h2>
+            </div>
+            <div class="vh-side">
+              <p>模型原始结果不可变；人工修订以追加版本记录，历史版本只读。</p>
+              <div class="vh-meta mono"><span>v0 IMMUTABLE</span><span>APPEND-ONLY</span></div>
+            </div>
           </div>
-          <div class="grid-2" style="margin-top:14px;align-items:start">
+          <div class="grid-2" style="align-items:start">
             <div>
               <div id="ver-list"></div>
             </div>
@@ -460,23 +531,29 @@
       </section>
 
       <!-- ---------- 导出 ---------- -->
-      <section class="view" id="view-export">
+      <section class="view light" id="view-export">
         <div class="pad">
           <div class="view-head">
-            <h2>报告导出</h2>
-            <p>导出绑定影像、任务、模型与结果版本，页面与报告使用同一统计口径</p>
+            <div class="vh-main">
+              <p class="kicker mono">// 09 — EXPORT</p>
+              <h2>报告导出</h2>
+            </div>
+            <div class="vh-side">
+              <p>导出绑定影像、任务、模型与结果版本，页面与报告使用同一统计口径。</p>
+              <div class="vh-meta mono"><span>CSV</span><span>PNG</span><span>JSON</span></div>
+            </div>
           </div>
 
-          <div class="grid-2" style="margin-top:14px;align-items:start">
+          <div class="grid-2" style="align-items:start">
             <div class="card">
               <h3>导出内容</h3>
               <div class="field">
                 <label for="ex-version">结果版本</label>
                 <select id="ex-version"></select>
               </div>
-              <div class="check"><span class="box">☑</span><span>检测结果表（CSV，含四点多边形与复核状态）</span></div>
-              <div class="check"><span class="box">☑</span><span>标注图（PNG，按原图像素绘制）</span></div>
-              <div class="check"><span class="box">☑</span><span>分析报告（JSON，含模型、参数与统计口径）</span></div>
+              <div class="check done"><span class="box">✓</span><span>检测结果表（CSV，含四点多边形与复核状态）</span></div>
+              <div class="check done"><span class="box">✓</span><span>标注图（PNG，按原图像素绘制）</span></div>
+              <div class="check done"><span class="box">✓</span><span>分析报告（JSON，含模型、参数与统计口径）</span></div>
               <div class="row" style="margin-top:14px">
                 <button class="btn primary" id="btn-export">生成并下载</button>
                 <span class="muted" id="ex-status" style="font-size:12px"></span>
@@ -493,9 +570,25 @@
 
     </main>
   </div>
+
+  <footer class="statusbar">
+    <span class="st-live mono"><i aria-hidden="true"></i>LIVE</span>
+    <div class="st-marquee" aria-hidden="true">
+      <div class="st-track">
+        <span>2305 × 1537</span><b>◆</b>
+        <span>12 TILES · 1024 / 512 · OVERLAP 128</span><b>◆</b>
+        <span>NMS 0.10 · 208 CANDIDATES → 52 MERGED</span><b>◆</b>
+        <span>44 / 48 DETECTED</span><b>◆</b>
+        <span>YOLOv8l-OBB</span><b>◆</b>
+        <span>CONTRACT SHIP-DETECTION / 0.2</span><b>◆</b>
+        <span>演示数据 · 非真实推理</span><b>◆</b>
+      </div>
+    </div>
+    <span class="st-right mono"><span id="status-clock">--:--:--</span><span>LOCAL · 127.0.0.1</span></span>
+  </footer>
 </div>
 
-<div class="toast-host" id="toasts"></div>
+<div class="toast-host" id="toasts" role="status" aria-live="polite"></div>
 
 <script src="config.js"></script>
 <script src="auth-session.js"></script>
@@ -505,6 +598,7 @@
 <script src="api/mock-backend.js"></script>
 <script src="api/client.js"></script>
 <script src="annotation-workflow.js"></script>
-<script src="app.js"></script>
+<script src="app.js?v=13"></script>
+<script src="motion.js?v=4"></script>
 </body>
 </html>

@@ -143,6 +143,8 @@
       retryTask: id => request('POST', `/tasks/${encodeURIComponent(id)}/retry`, {}),
       getTaskResult: id => request('GET', `/tasks/${encodeURIComponent(id)}/result`),
 
+      annotationAiStatus: id => request('GET', `/projects/${encodeURIComponent(id)}/annotation-ai`),
+      probeAnnotationAi: id => request('POST', `/projects/${encodeURIComponent(id)}/annotation-ai/probe`, {}),
       listAnnotations: id => request('GET', `/projects/${encodeURIComponent(id)}/annotations`),
       changeAnnotation: (id, operation, body) => serialized(id, () => {
         if (['submit','pause','request_release'].includes(operation) && failed.has(id))
