@@ -10,6 +10,17 @@
 一键启动、账号与自检见[快速开始](docs/quickstart.md)：`scripts/start-dev.ps1`。
 A/B 交付版本、权重校验与复跑步骤见[联合验收候选基线](docs/validation/ab-acceptance-baseline.md)。
 
+## 交付材料
+
+| 材料 | 位置 | 说明 |
+|---|---|---|
+| 规格说明书 | [SPEC.md](SPEC.md) | 需求 → 规格 → 验收 → 与代码对照；每条规格绑定实现位置与测试用例 |
+| 考查报告 | [docs/report/考查报告.md](docs/report/考查报告.md) | 8 章：需求分析、系统设计、详细设计与实现、测试与结果分析、AI 编程体会、总结与展望 |
+| 设计图 | [docs/report/figures/](docs/report/figures/) | 架构图、功能流程图、数据模型与数据流（PNG + 可编辑 HTML 源） |
+| 快速开始 | [docs/quickstart.md](docs/quickstart.md) | 一条命令起前后端、账号、自检命令、常见问题 |
+| 验证记录 | [docs/validation/](docs/validation/) | 真实权重 + 真实 HTTP + 真实浏览器联调与审计记录 |
+| 模块控制 | [docs/module-controls/](docs/module-controls/) | 各模块的状态、证据与已知限制 |
+
 检测模块另有大图推理模式（重叠切片、四点坐标还原、跨片多边形 NMS），见
 [检测契约 v0.2](contracts/ship-detection-v0.2.md)；启动、依赖与限制见
 [算法模块说明](algorithm/README.md)。
