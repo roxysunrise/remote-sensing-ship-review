@@ -41,3 +41,6 @@ weights/
 .idea/
 .DS_Store
 Thumbs.db
+
+# 报告 PDF 的构建中间物（源为 docs/report/考查报告.md）
+docs/report/*.html
