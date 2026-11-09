@@ -36,9 +36,15 @@ function annotationPanel(title, description) {
   const heading = document.createElement('h2');
   heading.textContent = title;
   const intro = document.createElement('p');
-  intro.className = 'muted';
+  intro.className = 'vh-note muted';
   intro.textContent = description;
-  host.append(heading, intro);
+  const header = document.createElement('div');
+  header.className = 'view-head';
+  const main = document.createElement('div');
+  main.className = 'vh-main';
+  main.append(heading);
+  header.append(main, intro);
+  host.append(header);
   return host;
 }
 
