@@ -13,12 +13,15 @@ const storageKey = 'ship-pilot-prototype-v1';
 let images;
 try { images = JSON.parse(localStorage.getItem(storageKey)) || structuredClone(initial); }
 catch { images = structuredClone(initial); }
-let role = 'lead', page = 'batch', active = null, selected = null, zoom = 1, pan = [0,0], undo = [];
+let role = 'review', page = 'hall', active = null, selected = null, zoom = 1, pan = [0,0], undo = [];
 const screen = $('screen');
 const dialog = $('dialog');
 const html = value => String(value).replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
 const button = (label, action, extra = '') => '<button type="button" data-action="' + action + '" ' + extra + '>' + label + '</button>';
-const editable = () => role === 'review' && active?.owner === 'lin' && active.status === 'editing';
+const running = () => images.find(i => i.owner === 'lin' && i.running);
+const low = target => target.id % 2 === 0;
+const pending = image => image.targets.filter(target => !target.confirmed);
+const editable = () => role === 'review' && active?.owner === 'lin' && active.status === 'editing' && active.running;
 
 function notify(message) { $('feedback').textContent = message; }
 function save(message) {
@@ -53,7 +56,42 @@ function row(image, action, title) {
     button(title, action + ':' + image.id) +
     (page === 'batch' && ['unassigned','editing'].includes(image.status) && image.owner ? button('重新分派','assign:' + image.id) : '') + '</div></div>';
 }
+function showDetails(image) {
+  active = image;
+  page = 'detail';
+  render();
+}
+function renderDetails() {
+  const image = active;
+  const canStart = !running() || running() === image;
+  screen.innerHTML = button('返回列表','back') + '<h1>' + html(image.name) +
+    '</h1><section class="details"><h2>任务说明</h2><p>范围：北港泊位整张影像。模型预标注 ' + image.targets.length +
+    ' 个，低置信度待确认 ' + pending(image).filter(low).length +
+    ' 个。</p><p>补画漏检、调整错位框、删除误检。逐个处理低置信度框，检查整张影像后批量确认高置信度框。</p>' +
+    (image.reason ? '<p class="warning">退回原因 · ' + html(image.reason) + '</p>' : '') +
+    (image.releaseRequest ? '<p>交还申请待主管处理。</p>' : '') + '</section><div class="tools">' +
+    (image.status === 'unassigned' ? button('领取任务','claim:' + image.id,running() ? 'disabled' : 'class="primary"') : '') +
+    (image.owner === 'lin' && image.status === 'editing' && !image.releaseRequest ?
+      button(image.started ? '继续标注' : '开始标注','start',canStart ? 'class="primary"' : 'disabled') +
+      (!image.started ? button('释放任务','release') : '') : '') + '</div>' +
+    (!canStart ? '<p class="muted">请先提交或暂停当前任务。</p>' : '');
+}
+function renderHall() {
+  const available = images.filter(i => i.status === 'unassigned');
+  const current = running();
+  const returned = queue().filter(i => i.reason);
+  screen.innerHTML = '<h1 tabindex="-1">任务大厅</h1>' +
+    (returned.length ? '<p class="warning">' + returned.length + ' 单退回待修改。' + button('查看我的任务','nav:mine') + '</p>' : '') +
+    (current ? '<section class="details"><h2>当前任务</h2><p>' + html(current.name) + '</p>' +
+      button(current.started ? '继续标注' : '查看任务说明','open:' + current.id,'class="primary"') + '</section>' : '') +
+    '<section class="details"><h2>推荐任务</h2>' + (available.length ? '<p>' + html(available[0].name) + '</p>' +
+      button('推荐领取','claim:' + available[0].id,current ? 'disabled' : 'class="primary"') : '<p>暂无可领取任务。</p>') +
+    (current ? '<p>完成或暂停当前任务后可继续领取。</p>' : '') +
+    '</section><h2>可领取任务</h2><div class="rows">' +
+    available.map(i => row(i,'details','查看任务')).join('') + '</div>';
+}
 function renderList() {
+  if (page === 'hall') { renderHall(); return; }
   const batch = page === 'batch';
   const items = batch ? images : page === 'sign' ? images.filter(image => image.status === 'submitted') : queue();
   const heading = batch ? '批次管理' : page === 'sign' ? '待签收' : '我的待办';
@@ -65,7 +103,9 @@ function renderList() {
     (items.length ? '<div class="rows">' + items.map(image => {
       if (batch && image.status === 'unassigned') return row(image,'assign','分派');
       if (batch && image.status === 'failed') return row(image,'retry','重试检测');
-      return row(image,'open',page === 'sign' ? '检查成果' : '打开影像');
+      if (batch && image.releaseRequest) return row(image,'resolve','处理交还');
+      return row(image,'open',page === 'sign' ? '检查成果' :
+        image.releaseRequest ? '查看交还申请' : image.started && image.running ? '继续标注' : '查看任务');
     }).join('') + '</div>' : '<p class="details">当前没有待处理影像。</p>');
 }
 function mapSvg(image) {
@@ -82,23 +122,28 @@ function renderWork() {
   if (editable()) tools.push(['加框','add'],['改框','edit'],['撤销','undo']);
   screen.innerHTML = '<div class="bar"><div>' + button('返回列表','back') + '<h1 tabindex="-1">' + html(image.name) +
     '</h1><p class="muted">北港巡查 01 / ' + labels[image.status] + ' / 本机保存模拟进度</p></div><div class="tools">' +
-    (editable() ? button('提交签收','submit','class="primary"') : role === 'lead' && image.status === 'submitted' ?
+    (editable() ? button('保存并暂停','pause') + button('申请交还','request-release') +
+      button('提交审核','submit',pending(image).length ? 'disabled' : 'class="primary"') : role === 'lead' && image.status === 'submitted' ?
       button('退回','return') + button('签收','accept','class="primary"') : '') + '</div></div>' +
     (image.reason ? '<p class="warning">退回原因 · ' + html(image.reason) + '</p>' : '') +
     '<div class="workspace"><aside><details open><summary>疑难目标（' + image.targets.length + '）</summary>' +
-    image.targets.map(item => button('船舶 ' + item.id,'select:' + item.id,'class="target" aria-pressed="' + (selected === item.id) + '"')).join('') +
-    '</details></aside><div class="map"><div class="tools">' +
+    [...image.targets].sort((a,b) => Number(!b.confirmed && low(b)) - Number(!a.confirmed && low(a))).map(item =>
+      button('船舶 ' + item.id + (item.confirmed ? ' · 已确认' : low(item) ? ' · 低置信度' : ' · 高置信度'),'select:' + item.id,'class="target" aria-pressed="' + (selected === item.id) + '"')).join('') +
+    '</details>' + (editable() ? '<p>待确认 ' + pending(image).length + ' 个</p>' +
+      button('批量确认高置信度','confirm-high',pending(image).some(item => !low(item)) ? '' : 'disabled') : '') +
+    '</aside><div class="map"><div class="tools">' +
     tools.map(([label,action]) => button(label,action,action === 'undo' && !undo.length || action === 'edit' && !target ? 'disabled' : '')).join('') +
     '<span>' + Math.round(zoom * 100) + '%</span></div>' + mapSvg(image) +
     '</div><aside><h2>目标属性</h2>' + (target ? '<p>船舶 ' + target.id + '</p><p>像素中心 ' + target.x + ', ' + target.y +
     '</p><p>角度 ' + target.angle + '°</p>' : '<p class="muted">请选择一个目标。</p>') +
+    (editable() && target ? button('确认此框','confirm',target.confirmed ? 'disabled' : '') + button('删除此框','delete') : '') +
     '</aside></div><details class="details"><summary>统计与修订历史</summary><p>当前船舶数量 ' + image.targets.length +
     '</p>' + image.history.map(entry => '<p>' + html(entry) + '</p>').join('') + '</details>';
 }
 function render() {
-  const entries = role === 'lead' ? [['批次管理','batch'],['待签收','sign']] : [['我的待办','mine']];
+  const entries = role === 'lead' ? [['批次管理','batch'],['待签收','sign']] : [['任务大厅','hall'],['我的任务','mine']];
   $('nav').innerHTML = entries.map(([label,key]) => button(label,'nav:' + key,page === key ? 'aria-current="page"' : '')).join('');
-  if (page === 'work') renderWork(); else renderList();
+  if (page === 'work') renderWork(); else if (page === 'detail') renderDetails(); else renderList();
 }
 function promptAction(title, content, callback) {
   $('dialog-title').textContent = title;
@@ -121,11 +166,69 @@ function onAction(action, id) {
   switch (action) {
     case 'nav': navigate(id); break;
     case 'back': navigate(role === 'review' ? 'mine' : active.status === 'submitted' ? 'sign' : 'batch'); break;
-    case 'open': if (image) openImage(image); break;
+    case 'details': if (image) showDetails(image); break;
+    case 'open':
+      if (!image) break;
+      if (role === 'lead' || (image.running && image.started)) openImage(image);
+      else if (image.issueTarget && !running() && !image.releaseRequest) {
+        image.started = true; image.running = true;
+        openImage(image); selected = image.issueTarget; save('已定位退回标注框');
+      } else showDetails(image);
+      break;
+    case 'claim':
+      if (role === 'review' && !running() && image?.status === 'unassigned') {
+        image.owner = 'lin'; image.status = 'editing'; image.running = true;
+        image.history.push('林遥领取任务'); showDetails(image); save('领取成功，请先阅读任务说明');
+      }
+      break;
+    case 'start':
+      if (role === 'review' && active?.owner === 'lin' && active.status === 'editing' &&
+          (!running() || running() === active) && !active.releaseRequest) {
+        active.started = true; active.running = true;
+        openImage(active); if (active.issueTarget) selected = active.issueTarget;
+        save('已开始标注');
+      }
+      break;
+    case 'release':
+      if (role === 'review' && active?.owner === 'lin' && !active.started && active.status === 'editing') {
+        active.owner = ''; active.status = 'unassigned'; active.running = false;
+        active.history.push('林遥释放未开始任务'); navigate('hall'); save('任务已回到大厅');
+      }
+      break;
+    case 'pause':
+      if (editable()) { active.running = false; navigate('mine'); save('已保存并暂停'); }
+      break;
+    case 'request-release':
+      if (editable()) promptAction('申请交还任务','<label>原因<textarea name="reason" required maxlength="200"></textarea></label>',data => {
+        const reason = data.get('reason').trim();
+        if (!reason) return false;
+        active.releaseRequest = reason; active.running = false; navigate('mine'); save('交还申请已提交，等待主管处理');
+      });
+      break;
+    case 'resolve':
+      if (role === 'lead' && image?.releaseRequest) promptAction('处理交还','<p>' + html(image.releaseRequest) +
+        '</p><p>确认后取消当前分派，保留已保存标注。</p>',() => {
+        image.releaseRequest = ''; image.owner = ''; image.status = 'unassigned'; save('已交回任务大厅');
+      });
+      break;
+    case 'confirm':
+    case 'confirm-high':
+    case 'delete':
+      if (editable()) {
+        undo.push(structuredClone(active.targets));
+        if (action === 'delete') {
+          active.targets = active.targets.filter(item => item.id !== selected);
+          selected = active.targets[0]?.id;
+        } else for (const item of active.targets) {
+          if (action === 'confirm' ? item.id === selected : !low(item)) item.confirmed = true;
+        }
+        save('复核稿已保存到此浏览器');
+      }
+      break;
     case 'assign':
       if (role !== 'lead' || !image || !['unassigned','editing'].includes(image.status)) break;
       promptAction('分派 ' + image.name,'<label>复核员<select name="owner"><option value="lin">林遥</option><option value="chen">陈帆</option></select></label>',data => {
-        image.owner = data.get('owner'); image.status = 'editing'; image.history.push('周宁分派给 ' + people[image.owner]); save('分派已保存');
+        image.running = false; image.owner = data.get('owner'); image.status = 'editing'; image.history.push('周宁分派给 ' + people[image.owner]); save('分派已保存');
       });
       break;
     case 'retry':
@@ -151,8 +254,8 @@ function onAction(action, id) {
       break;
     }
     case 'submit':
-      if (editable()) {
-        active.reason = '';
+      if (editable() && !pending(active).length) {
+        active.running = false; active.issueTarget = null; active.reason = '';
         moveTo('submitted','林遥提交签收','已提交签收','mine');
       }
       break;
@@ -160,9 +263,12 @@ function onAction(action, id) {
       if (role === 'lead' && active?.status === 'submitted') moveTo('accepted','周宁已签收 · v1','已签收，可纳入交付','sign');
       break;
     case 'return':
-      if (role === 'lead' && active?.status === 'submitted') promptAction('退回复核','<label>退回原因<textarea name="reason" required maxlength="200"></textarea></label><p id="reason-error" role="alert"></p>',data => {
+      if (role === 'lead' && active?.status === 'submitted') promptAction('退回复核','<label>退回原因<textarea name="reason" required maxlength="200"></textarea></label><label><input type="checkbox" name="target">关联当前选中的船舶框</label><p id="reason-error" role="alert"></p>',data => {
         const reason = data.get('reason').trim();
         if (!reason) { $('reason-error').textContent = '请输入退回原因。'; return false; }
+        active.issueTarget = data.has('target') ? selected : null;
+        const target = active.targets.find(item => item.id === active.issueTarget);
+        if (target) target.confirmed = false;
         active.reason = reason; moveTo('editing','周宁退回 · ' + reason,'已退回给原复核员','sign');
       });
       break;
@@ -183,6 +289,7 @@ function onAction(action, id) {
           '<label>' + label + '<input type="number" name="' + key + '" min="' + min + '" max="' + max + '" value="' + box[key] + '" required></label>').join(''),data => {
           undo.push(structuredClone(active.targets));
           for (const key of ['x','y','angle']) box[key] = Number(data.get(key));
+          box.confirmed = true;
           if (!target) active.targets.push(box);
           selected = box.id;
           save('复核稿已保存到此浏览器');
@@ -206,7 +313,8 @@ document.addEventListener('click',event => {
 });
 $('role').addEventListener('change',event => {
   role = event.target.value;
-  navigate(role === 'lead' ? 'batch' : 'mine');
+  navigate(role === 'lead' ? 'batch' : 'hall');
 });
+$('role').value = role;
 $('cancel').addEventListener('click',() => dialog.close());
 render();
