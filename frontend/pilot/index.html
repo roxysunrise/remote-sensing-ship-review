@@ -1,0 +1,12 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>港区影像复核 · 试点原型</title>
+<link rel="stylesheet" href="pilot.css">
+<header><div><strong>港区影像复核</strong><span class="sample">试点原型 · 模拟数据</span></div><label>演练身份 <select id="role"><option value="lead">主管 · 周宁</option><option value="review">复核员 · 林遥</option></select></label></header>
+<div class="shell"><nav id="nav" aria-label="主导航"></nav><main id="screen"></main></div>
+<div id="feedback" role="status" aria-live="polite"></div>
+<dialog id="dialog"><form id="dialog-form"><h2 id="dialog-title"></h2><div id="dialog-content"></div><footer><button type="button" id="cancel">取消</button><button class="primary">确认</button></footer></form></dialog>
+<script src="pilot.js" defer></script>
+</html>
