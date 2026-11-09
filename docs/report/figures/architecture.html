@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>系统架构图</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 34px 40px; background: #f6f8fb; color: #16202b;
+         font-family: "Microsoft YaHei", "Segoe UI", sans-serif; }
+  h1 { font-size: 22px; margin: 0 0 4px; letter-spacing: .5px; }
+  .sub { font-size: 12.5px; color: #6b7b8c; margin-bottom: 26px; }
+  .layer { display: flex; align-items: stretch; gap: 14px; margin-bottom: 12px; }
+  .tag { width: 118px; flex: 0 0 118px; border-radius: 10px; padding: 12px 10px;
+         color: #fff; font-size: 12.5px; font-weight: 600; line-height: 1.5;
+         display: flex; flex-direction: column; justify-content: center; }
+  .tag small { font-weight: 400; opacity: .82; font-size: 10.5px; margin-top: 4px; }
+  .boxes { flex: 1; display: flex; gap: 10px; flex-wrap: wrap; }
+  .box { flex: 1; min-width: 132px; background: #fff; border: 1px solid #dbe3ec;
+         border-radius: 10px; padding: 10px 12px; font-size: 12.5px; line-height: 1.55;
+         box-shadow: 0 1px 2px rgba(20,40,70,.05); }
+  .box b { display: block; font-size: 13px; margin-bottom: 2px; }
+  .box span { color: #6b7b8c; font-size: 11.5px; }
+  .l1 .tag { background: #2f6df6; }
+  .l2 .tag { background: #22a06b; }
+  .l3 .tag { background: #7a5cf0; }
+  .l4 .tag { background: #e08a2e; }
+  .l5 .tag { background: #4a5c73; }
+  .arrow { text-align: center; color: #9aa9ba; font-size: 15px; line-height: 1;
+           margin: -4px 0 8px 132px; }
+  .legend { margin-top: 18px; font-size: 11.5px; color: #6b7b8c; display: flex; gap: 22px; }
+  .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px;
+              margin-right: 5px; vertical-align: -1px; }
+</style>
+</head>
+<body>
+  <h1>系统架构</h1>
+  <div class="sub">遥感船舶检测与人机协同复核系统 · 浏览器 → 接口 → 业务后端 → 算法 → 存储（同源部署，单进程）</div>
+
+  <div class="layer l1">
+    <div class="tag">浏览器前端<small>frontend/ · 原生 JS</small></div>
+    <div class="boxes">
+      <div class="box"><b>login.html</b><span>登录 / 会话 / 项目选择</span></div>
+      <div class="box"><b>index.html 工作台</b><span>项目·上传·任务·复核·统计·历史·导出</span></div>
+      <div class="box"><b>detect.html 检测页</b><span>图片/视频 · AI 辅助框选</span></div>
+      <div class="box"><b>tiles-view.js</b><span>大图瓦片视口 · 跨块旋转框</span></div>
+    </div>
+  </div>
+  <div class="arrow">▼ HTTP / JSON（同源，无 CORS）</div>
+
+  <div class="layer l2">
+    <div class="tag">接口层<small>serve.py 反向代理</small></div>
+    <div class="boxes">
+      <div class="box"><b>/api/v1 业务接口 47 条</b><span>鉴权·项目·上传·影像·任务·草稿·版本·导出·瓦片·账号</span></div>
+      <div class="box"><b>/api/v1/vision/* 推理接口 5 条</b><span>capabilities·sessions·detect·segment·cancel</span></div>
+      <div class="box"><b>统一错误信封</b><span>code / message / details.request_id</span></div>
+    </div>
+  </div>
+  <div class="arrow">▼ 内部调用</div>
+
+  <div class="layer l3">
+    <div class="tag">业务后端<small>backend/ · FastAPI</small></div>
+    <div class="boxes">
+      <div class="box"><b>api.py</b><span>业务编排 · 权限校验</span></div>
+      <div class="box"><b>security.py</b><span>PBKDF2 · 会话 · 限速</span></div>
+      <div class="box"><b>jobs.py</b><span>队列 · 状态机 · 原子发布</span></div>
+      <div class="box"><b>storage / imaging</b><span>私有存储 · 解码预览</span></div>
+      <div class="box"><b>geometry / stats</b><span>复核排序 · 区域计数</span></div>
+      <div class="box"><b>ai_assist / ai_planner</b><span>候选生成 · VLM 门控</span></div>
+      <div class="box"><b>tiles.py</b><span>金字塔 · 按需生成</span></div>
+    </div>
+  </div>
+  <div class="arrow">▼ 检测与几何唯一实现</div>
+
+  <div class="layer l4">
+    <div class="tag">算法层<small>algorithm/</small></div>
+    <div class="boxes">
+      <div class="box"><b>ship_detector.py</b><span>YOLOv8l-OBB 单图推理 · 四点多边形</span></div>
+      <div class="box"><b>tiled_inference.py</b><span>重叠切片 · 坐标还原 · 跨片 IoU 合并</span></div>
+      <div class="box"><b>best.pt（不入库）</b><span>DOTA-v1 训练权重 · SHA256 校验</span></div>
+    </div>
+  </div>
+  <div class="arrow">▼ 读写</div>
+
+  <div class="layer l5">
+    <div class="tag">存储<small>本地私有</small></div>
+    <div class="boxes">
+      <div class="box"><b>SQLite（14 张表）</b><span>业务记录是唯一写入口</span></div>
+      <div class="box"><b>var/blobs · previews</b><span>原图与预览，系统内部标识</span></div>
+      <div class="box"><b>var/results · exports</b><span>检测结果与导出产物</span></div>
+    </div>
+  </div>
+
+  <div class="legend">
+    <span><i style="background:#2f6df6"></i>表现层</span>
+    <span><i style="background:#22a06b"></i>接口层</span>
+    <span><i style="background:#7a5cf0"></i>业务层</span>
+    <span><i style="background:#e08a2e"></i>算法层</span>
+    <span><i style="background:#4a5c73"></i>存储层</span>
+    <span>业务数据库是唯一写入口；Worker 只把结果写到 var/results/，再由 jobs.py 发布为 v0。</span>
+  </div>
+</body>
+</html>

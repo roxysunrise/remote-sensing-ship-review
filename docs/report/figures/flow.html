@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>功能流程图</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 32px 38px; background: #f6f8fb; color: #16202b;
+         font-family: "Microsoft YaHei", "Segoe UI", sans-serif; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  .sub { font-size: 12.5px; color: #6b7b8c; margin-bottom: 24px; }
+  .flow { display: flex; align-items: stretch; gap: 0; margin-bottom: 8px; }
+  .step { flex: 1; background: #fff; border: 1px solid #dbe3ec; border-radius: 10px;
+          padding: 12px 12px 11px; position: relative; box-shadow: 0 1px 2px rgba(20,40,70,.05); }
+  .step + .step { margin-left: 26px; }
+  .step + .step::before { content: "→"; position: absolute; left: -21px; top: 50%;
+          transform: translateY(-50%); color: #9aa9ba; font-size: 15px; }
+  .no { font-size: 10.5px; font-weight: 700; letter-spacing: .8px; color: #fff;
+        background: #2f6df6; border-radius: 5px; padding: 2px 6px; display: inline-block; }
+  .step h3 { font-size: 13px; margin: 7px 0 5px; }
+  .step p { font-size: 11.5px; color: #6b7b8c; margin: 0; line-height: 1.55; }
+  .step .api { display: block; margin-top: 6px; font-size: 10.5px; color: #22a06b;
+               font-family: Consolas, monospace; word-break: break-all; }
+  .states { margin-top: 20px; background: #fff; border: 1px solid #dbe3ec; border-radius: 10px;
+            padding: 14px 16px; }
+  .states h3 { font-size: 13px; margin: 0 0 10px; }
+  .row { display: flex; align-items: center; gap: 8px; font-size: 12px; flex-wrap: wrap;
+         margin-bottom: 8px; }
+  .chip { padding: 4px 10px; border-radius: 999px; font-size: 11.5px; font-weight: 600; }
+  .q { background: #eef3fb; color: #2f6df6; }
+  .r { background: #e8f6ef; color: #22a06b; }
+  .m { background: #f3eefc; color: #7a5cf0; }
+  .d { background: #e8f7ee; color: #1d8a56; }
+  .c { background: #fdf1e4; color: #c87a1e; }
+  .f { background: #fdecec; color: #c0392b; }
+  .arrowtxt { color: #9aa9ba; }
+  .note { margin-top: 14px; font-size: 11.5px; color: #6b7b8c; line-height: 1.8; }
+</style>
+</head>
+<body>
+  <h1>功能流程</h1>
+  <div class="sub">一次完整业务闭环：登录 → 上传 → 检测 → 复核 → 统计 → 导出，以及每一步的服务端状态</div>
+
+  <div class="flow">
+    <div class="step">
+      <span class="no">01</span>
+      <h3>登录进入项目</h3>
+      <p>受控开户的账号登录，服务端按成员关系返回项目空间</p>
+      <span class="api">POST /auth/login → token</span>
+    </div>
+    <div class="step">
+      <span class="no">02</span>
+      <h3>可靠上传</h3>
+      <p>分片传输 → 合并 → SHA-256 校验 → 图像验证 → 生成预览</p>
+      <span class="api">POST /uploads · PUT /chunks · POST /complete</span>
+    </div>
+    <div class="step">
+      <span class="no">03</span>
+      <h3>创建检测任务</h3>
+      <p>参数在创建时校验；入队后由 Worker 逐片推理</p>
+      <span class="api">POST /projects/{id}/tasks</span>
+    </div>
+    <div class="step">
+      <span class="no">04</span>
+      <h3>切片推理</h3>
+      <p>重叠切片、坐标还原、跨片 IoU 合并，进度来自真实分片</p>
+      <span class="api">GET /tasks/{id}（tiles_done）</span>
+    </div>
+  </div>
+
+  <div class="flow">
+    <div class="step">
+      <span class="no">05</span>
+      <h3>结果发布</h3>
+      <p>终态与 v0 基线版本同一事务提交，模型原始结果只读</p>
+      <span class="api">GET /tasks/{id}/result · /versions</span>
+    </div>
+    <div class="step">
+      <span class="no">06</span>
+      <h3>人工复核</h3>
+      <p>草稿从 v0 加载；确认/改框/补框；AI 候选先预览后确认</p>
+      <span class="api">GET /draft · PATCH /draft/detections</span>
+    </div>
+    <div class="step">
+      <span class="no">07</span>
+      <h3>提交版本</h3>
+      <p>带变更摘要追加 v1；空修改拒绝，历史版本只读</p>
+      <span class="api">POST /tasks/{id}/versions</span>
+    </div>
+    <div class="step">
+      <span class="no">08</span>
+      <h3>区域统计与导出</h3>
+      <p>中心点落入计数；CSV/JSON/PNG 三格式绑定版本导出</p>
+      <span class="api">POST /draft/regions · /exports</span>
+    </div>
+  </div>
+
+  <div class="states">
+    <h3>任务状态机与不变式</h3>
+    <div class="row">
+      <span class="chip q">queued</span><span class="arrowtxt">→</span>
+      <span class="chip r">running</span><span class="arrowtxt">→</span>
+      <span class="chip m">merging</span><span class="arrowtxt">→</span>
+      <span class="chip d">done</span>
+      <span style="width:18px"></span>
+      <span class="chip c">cancelled</span>
+      <span class="chip f">failed</span>
+      <span style="color:#6b7b8c">（取消在切片边界生效；重启时未完成任务如实标 failed，不假装续算）</span>
+    </div>
+    <div class="row">
+      <span style="color:#6b7b8c">
+        done ⇒ final_count 非空且等于结果 count ｜ temp_count 只用于过程展示，不得进统计 ｜
+        attempt 递增，旧尝试产物可回收 ｜ 终态与 v0 原子提交
+      </span>
+    </div>
+  </div>
+
+  <div class="note">
+    异常分支：未就绪影像不能建任务（409 IMAGE_NOT_READY）；空修改提交 409 NOTHING_TO_COMMIT；
+    并发/队列超限 429 RATE_LIMITED；跨项目一律 403 PROJECT_FORBIDDEN；非法参数 422（创建时即拒绝，不入队）。
+  </div>
+</body>
+</html>

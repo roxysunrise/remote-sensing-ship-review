@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>数据模型与数据流</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 32px 38px; background: #f6f8fb; color: #16202b;
+         font-family: "Microsoft YaHei", "Segoe UI", sans-serif; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  .sub { font-size: 12.5px; color: #6b7b8c; margin-bottom: 22px; }
+  .cols { display: flex; gap: 16px; align-items: flex-start; }
+  .col { flex: 1; }
+  .col > h2 { font-size: 12.5px; margin: 0 0 8px; color: #4a5c73; letter-spacing: .6px; }
+  .ent { background: #fff; border: 1px solid #dbe3ec; border-left: 3px solid #2f6df6;
+         border-radius: 9px; padding: 9px 11px; margin-bottom: 9px;
+         box-shadow: 0 1px 2px rgba(20,40,70,.05); }
+  .ent h3 { font-size: 12.5px; margin: 0 0 4px; font-family: Consolas, monospace; }
+  .ent p { margin: 0; font-size: 11px; color: #6b7b8c; line-height: 1.55; }
+  .ent.acc { border-left-color: #7a5cf0; }
+  .ent.img { border-left-color: #22a06b; }
+  .ent.res { border-left-color: #e08a2e; }
+  .ent.evt { border-left-color: #8a97a8; }
+  .rel { font-size: 10.5px; color: #22a06b; font-family: Consolas, monospace;
+         margin: -4px 0 8px 8px; }
+  .flowline { margin-top: 20px; background: #fff; border: 1px solid #dbe3ec;
+              border-radius: 10px; padding: 14px 16px; }
+  .flowline h3 { font-size: 12.5px; margin: 0 0 10px; }
+  .chain { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 11.5px; }
+  .node { background: #eef3fb; color: #2f6df6; border-radius: 6px; padding: 5px 9px;
+          font-weight: 600; }
+  .node.g { background: #e8f6ef; color: #1d8a56; }
+  .node.o { background: #fdf1e4; color: #b8731c; }
+  .ar { color: #9aa9ba; }
+  .note { margin-top: 12px; font-size: 11.5px; color: #6b7b8c; line-height: 1.8; }
+</style>
+</head>
+<body>
+  <h1>数据模型与数据流</h1>
+  <div class="sub">14 张表 · 业务数据库是唯一写入口 · 文件与记录分离 · 版本链保证可追溯</div>
+
+  <div class="cols">
+    <div class="col">
+      <h2>账号与项目</h2>
+      <div class="ent acc"><h3>users</h3><p>id · username · password_hash（PBKDF2）· is_admin · status</p></div>
+      <div class="ent acc"><h3>sessions</h3><p>token_hash（只存摘要）· project_id · expires_at · revoked</p></div>
+      <div class="ent acc"><h3>projects</h3><p>id · code（PRJ-A-0271）· name</p></div>
+      <div class="ent acc"><h3>members</h3><p>project_id + user_id · role（负责人 / 分析员）</p></div>
+      <div class="rel">users 1—N sessions ｜ users N—N projects（经 members）</div>
+    </div>
+
+    <div class="col">
+      <h2>影像与任务</h2>
+      <div class="ent img"><h3>uploads</h3><p>status · stage · chunks_* · expires_at（未完成分片）</p></div>
+      <div class="ent img"><h3>images</h3><p>sha256 · width/height · status · stored_name（内部标识）</p></div>
+      <div class="ent img"><h3>tasks</h3><p>status · attempt · tiles_* · temp_count/final_count · parameters</p></div>
+      <div class="ent img"><h3>candidates</h3><p>image_id · polygon · source · quality · status（AI 候选）</p></div>
+      <div class="rel">uploads 1—1 images ｜ images 1—N tasks ｜ images 1—N candidates</div>
+    </div>
+
+    <div class="col">
+      <h2>结果与产物</h2>
+      <div class="ent res"><h3>versions</h3><p>task_id · label(v0,v1…) · readonly · summary · detections</p></div>
+      <div class="ent res"><h3>draft_state / draft_detections</h3><p>复核工作副本 · review_state · origin（model/manual/ai）</p></div>
+      <div class="ent res"><h3>regions</h3><p>task_id · polygon · counts（中心点落入口径）</p></div>
+      <div class="ent res"><h3>exports</h3><p>version_id · status · files（CSV/JSON/PNG）</p></div>
+      <div class="ent evt"><h3>events</h3><p>action（login/task.create/ai.propose/…）· detail · 时间</p></div>
+      <div class="rel">tasks 1—N versions ｜ versions 1—N exports ｜ tasks 1—1 draft_state</div>
+    </div>
+  </div>
+
+  <div class="flowline">
+    <h3>一次任务的数据流</h3>
+    <div class="chain">
+      <span class="node">原始影像</span><span class="ar">→</span>
+      <span class="node g">var/blobs</span><span class="ar">→</span>
+      <span class="node">images 记录</span><span class="ar">→</span>
+      <span class="node o">Worker 逐片推理</span><span class="ar">→</span>
+      <span class="node g">var/results/*.json</span><span class="ar">→</span>
+      <span class="node">事务：tasks.done + versions.v0</span><span class="ar">→</span>
+      <span class="node">draft（复核）</span><span class="ar">→</span>
+      <span class="node">versions.v1</span><span class="ar">→</span>
+      <span class="node g">exports/*</span>
+    </div>
+    <div class="note">
+      模型原始结果（v0）不可变：人工修订只写草稿，提交后追加新版本，导出绑定版本号。
+      删除/过期策略：上传会话 24 h、导出 72 h、过期分片与旧尝试产物在启动时清理；
+      库与文件的一致性用 <b>python -m backend.tools.fsck</b> 对账（实测 0 问题）。
+    </div>
+  </div>
+</body>
+</html>
