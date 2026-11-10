@@ -1,4 +1,4 @@
-# 遥感船舶检测与人机协同复核 — 前端演示
+﻿# 遥感船舶检测与人机协同复核 — 前端演示
 
 面向港口遥感影像的船舶检测与复核工作台，实现自仓库
 `roxysunrise/remote-sensing-ship-review` 的算法模块与四份职责/设计文档。
@@ -66,9 +66,25 @@ window.DETECT_CONFIG = {
 | 文件 | 作用 |
 |---|---|
 | [`api/DETECT_API.md`](api/DETECT_API.md) | 请求 / 响应、坐标约定、错误码、接入顺序 |
+| [`api/AI_ASSIST_API.md`](api/AI_ASSIST_API.md) | 使用者可填写的 AI 辅助分割接口契约 |
 | [`api/detect-openapi.yaml`](api/detect-openapi.yaml) | 5 个端点的机器可读规格 |
 | [`api/detect-api.js`](api/detect-api.js) | 双适配器与统一 `DetectApiError` |
 | [`api/detect-mock.js`](api/detect-mock.js) | 浏览器内亮度连通域 / ROI 分割，仅用于演示 |
+
+### 填写自己的 AI 接口
+
+检测页右侧「AI 辅助框选」→「接入设置」可以直接填写：
+
+| 字段 | 说明 |
+|---|---|
+| 接口地址 | `POST` 地址，需允许当前站点 CORS |
+| API Key | 可选；填写后以 `Authorization: Bearer` 发送 |
+| 模型名 | 可选；放在请求体 `model` 字段 |
+| 超时 | 毫秒，默认 30000 |
+
+保存后只影响本页「AI 辅助」的框选 / 点选请求；留空或清除则回退到内置
+`DetectAPI`。设置保存在本机 `localStorage` 的 `ship.aiAssist.v1`，不会提交到仓库。
+完整请求 / 响应、坐标约定、错误码见 [`api/AI_ASSIST_API.md`](api/AI_ASSIST_API.md)。
 
 端点：`GET /vision/capabilities`、`POST /vision/sessions`、`POST /vision/detect`、
 `POST /vision/segment`、`POST /vision/jobs/{job_id}/cancel`（预留，完整定义见文档）。
@@ -280,7 +296,7 @@ LIVE 点与警告；**珊瑚 `#d92d50`** 只给删除与错误，和钴蓝信号
 
 工作台、区域统计与智能检测的影像四周使用 `assets/ocean.webp`：Deep Blue Sea by Shagil Kannur，来源 Wikimedia Commons，CC BY-SA 4.0（已在此与检测页状态条署名）。它只做影像四周的背景，不参与检测、坐标或画布像素计算；被检测影像本身仍由 Canvas 原样绘制在这层背景之上。
 
-界面截图见 `screenshots/2026-11-08-{project,workbench,detect,login}.png`；旧版对照见 `screenshots/01-workbench.png`。
+界面截图见 `screenshots/2026-11-08-{project,task,workbench,detect,login,ai-config}.png`；旧版对照见 `screenshots/01-workbench.png`。
 
 ## 操作提示
 

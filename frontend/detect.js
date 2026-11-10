@@ -35,6 +35,17 @@
   };
   const ORIGIN_LABEL = { model: '模型', manual: '手工', ai: 'AI 辅助' };
 
+  /* 使用者填写的 AI 接口；只保存在本机，不写入代码或仓库。 */
+  const AI_CFG_KEY = 'ship.aiAssist.v1';
+  function readAIConfig() {
+    try {
+      const raw = localStorage.getItem(AI_CFG_KEY);
+      return raw ? JSON.parse(raw) : {};
+    } catch (_) { return {}; }
+  }
+  let AI_CFG = readAIConfig();
+  const aiConfigured = () => !!(AI_CFG.endpoint && AI_CFG.endpoint.trim());
+
   /* ------------------------------------------------------------------ state */
 
   const S = {
@@ -91,6 +102,7 @@
     bindStage();
     bindVideo();
     bindAi();
+    bindAIConfig();
     bindDetail();
     bindKeyboard();
     renderAll();
@@ -1506,7 +1518,7 @@
     }
 
     let dataUrl = '';
-    if (window.DetectAPI.mode === 'http') {
+    if (aiConfigured() || window.DetectAPI.mode === 'http') {
       try {
         dataUrl = payload.toDataURL('image/jpeg',
           Number(CFG.mock && CFG.mock.jpegQuality) || 0.86);
@@ -1672,21 +1684,25 @@
 
     try {
       await ensureSession();
-      const res = await window.DetectAPI.segment({
+      const payload = {
         session_id: S.sessionId,
         kind: S.media.kind,
-        frame: {
-          index: idx, time_ms: t,
-          width: S.media.width, height: S.media.height,
-          canvas: frame.canvas
-        },
         image: { data_url: frame.data_url, width: frame.width, height: frame.height },
         roi: opts.roi || null,
         point: opts.point || null,
         prompt: S.ai.prompt || 'ship',
         mode: opts.roi ? 'roi' : 'point',
         options: { conf: 0.25 }
-      });
+      };
+      const res = aiConfigured()
+        ? await callCustomSegment(payload)
+        : await window.DetectAPI.segment(Object.assign({}, payload, {
+          frame: {
+            index: idx, time_ms: t,
+            width: S.media.width, height: S.media.height,
+            canvas: frame.canvas
+          }
+        }));
 
       if (currentFrameIndex() !== idx) {
         S.ai.status = 'idle';
@@ -1791,7 +1807,8 @@
     const mode = window.DetectAPI.mode;
     els.api.textContent = mode === 'mock' ? 'mock · 本地' : 'http';
     els.api.title = window.DetectAPI.baseUrl || '';
-    els.aiMode.textContent = mode;
+    els.aiMode.textContent = aiConfigured() ? 'custom' : mode;
+    els.aiMode.title = aiConfigured() ? AI_CFG.endpoint : '';
     els.modeBadge.textContent = mode === 'mock' ? '演示推理' : '真实接口';
     els.modeBadge.className = 'badge ' + (mode === 'mock' ? 'demo' : 'live');
   }
@@ -2756,6 +2773,143 @@
   }
 
   /* ------------------------------------------------------------------ AI events */
+
+  /* ------------------------------------------------------------------ AI config */
+
+  function applyAIConfig() {
+    const tag = $('#dt-ai-tag');
+    const mode = $('#dt-ai-mode');
+    if (tag) tag.textContent = aiConfigured() ? '已接入' : '可接入';
+    if (mode) {
+      mode.textContent = aiConfigured()
+        ? 'custom'
+        : ((window.DetectAPI && window.DetectAPI.mode) || 'mock');
+      mode.title = aiConfigured()
+        ? AI_CFG.endpoint
+        : '未填写自定义接口，使用内置 AI 辅助';
+    }
+  }
+
+  function fillAIConfigForm() {
+    const set = (id, value) => { const el = document.getElementById(id); if (el) el.value = value == null ? '' : value; };
+    set('ai-endpoint', AI_CFG.endpoint || '');
+    set('ai-key', AI_CFG.apiKey || '');
+    set('ai-model', AI_CFG.model || '');
+    set('ai-timeout', AI_CFG.timeoutMs || 30000);
+  }
+
+  function bindAIConfig() {
+    const dlg = document.getElementById('dt-ai-config-dialog');
+    const open = document.getElementById('dt-ai-config');
+    if (!dlg || !open) return;
+    const close = () => { if (dlg.open) dlg.close(); };
+
+    open.addEventListener('click', () => {
+      fillAIConfigForm();
+      if (typeof dlg.showModal === 'function') dlg.showModal();
+      else dlg.setAttribute('open', '');
+    });
+    document.getElementById('ai-config-close').addEventListener('click', close);
+    document.getElementById('ai-config-cancel').addEventListener('click', close);
+    dlg.addEventListener('click', ev => { if (ev.target === dlg) close(); });
+
+    const save = () => {
+      const endpoint = (document.getElementById('ai-endpoint').value || '').trim();
+      if (endpoint && !/^https?:\/\//i.test(endpoint)) {
+        toast('接口地址需以 http:// 或 https:// 开头', 'err');
+        return;
+      }
+      if (endpoint) {
+        AI_CFG = {
+          endpoint,
+          apiKey: (document.getElementById('ai-key').value || '').trim(),
+          model: (document.getElementById('ai-model').value || '').trim(),
+          timeoutMs: Math.max(1000, Number(document.getElementById('ai-timeout').value) || 30000)
+        };
+        try { localStorage.setItem(AI_CFG_KEY, JSON.stringify(AI_CFG)); } catch (_) {}
+        close();
+        applyAIConfig();
+        toast('AI 接口已保存，下一次 AI 辅助将直接调用该地址', 'ok');
+      } else {
+        try { localStorage.removeItem(AI_CFG_KEY); } catch (_) {}
+        AI_CFG = {};
+        close();
+        applyAIConfig();
+        toast('已清空自定义 AI，恢复内置接口');
+      }
+    };
+
+    document.getElementById('ai-config-save').addEventListener('click', save);
+    document.getElementById('dt-ai-config-form').addEventListener('submit', ev => {
+      ev.preventDefault();
+      save();
+    });
+    document.getElementById('ai-config-clear').addEventListener('click', () => {
+      try { localStorage.removeItem(AI_CFG_KEY); } catch (_) {}
+      AI_CFG = {};
+      close();
+      applyAIConfig();
+      toast('已清空自定义 AI，恢复内置接口');
+    });
+
+    applyAIConfig();
+  }
+
+  async function callCustomSegment(payload) {
+    const ctrl = new AbortController();
+    const timeout = Math.max(1000, Number(AI_CFG.timeoutMs) || 30000);
+    const timer = setTimeout(() => ctrl.abort(), timeout);
+    try {
+      const headers = { Accept: 'application/json', 'Content-Type': 'application/json' };
+      if (AI_CFG.apiKey) headers.Authorization = 'Bearer ' + AI_CFG.apiKey;
+      const body = {
+        model: AI_CFG.model || undefined,
+        session_id: payload.session_id,
+        prompt: payload.prompt,
+        mode: payload.mode,
+        image: payload.image,
+        roi: payload.roi,
+        point: payload.point,
+        options: payload.options
+      };
+      const r = await fetch(AI_CFG.endpoint, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(body),
+        signal: ctrl.signal,
+        credentials: 'omit'
+      });
+      const raw = await r.text();
+      let data = null;
+      try { data = raw ? JSON.parse(raw) : null; } catch (_) {}
+      if (!r.ok) {
+        const msg = (data && data.error && data.error.message) || raw.slice(0, 140) || ('HTTP ' + r.status);
+        const err = new Error('AI 接口返回 ' + r.status + ' · ' + msg);
+        err.code = 'AI_HTTP_' + r.status;
+        throw err;
+      }
+      if (!data || !Array.isArray(data.candidates)) {
+        const err = new Error('AI 接口响应缺少 candidates 数组');
+        err.code = 'AI_BAD_RESPONSE';
+        throw err;
+      }
+      return data;
+    } catch (err) {
+      if (err.name === 'AbortError') {
+        const e = new Error('AI 接口超时（' + timeout + ' ms）');
+        e.code = 'AI_TIMEOUT';
+        throw e;
+      }
+      if (err instanceof TypeError) {
+        const e = new Error('AI 接口无法连接，请检查地址、CORS 与 HTTPS 设置');
+        e.code = 'AI_NETWORK';
+        throw e;
+      }
+      throw err;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
 
   function bindAi() {
     els.ai.addEventListener('click', ev => {

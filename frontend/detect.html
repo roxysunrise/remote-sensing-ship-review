@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
@@ -10,7 +10,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="styles.css?v=54">
-<link rel="stylesheet" href="detect.css?v=74">
+<link rel="stylesheet" href="detect.css?v=75">
 </head>
 <body>
 
@@ -215,7 +215,8 @@
       <section class="dt-sec dt-ai-sec sec-ai">
         <div class="dt-sec-h">
           <span>AI 辅助框选</span>
-          <span class="tag ai">可接入</span>
+          <span class="tag ai" id="dt-ai-tag">可接入</span>
+          <button class="dt-ai-set" id="dt-ai-config" type="button">接入设置</button>
           <div class="spacer"></div>
           <span class="mono dim" id="dt-ai-mode">mock</span>
         </div>
@@ -242,13 +243,87 @@
   </footer>
 </div>
 
+<dialog class="ai-config" id="dt-ai-config-dialog" aria-labelledby="ai-config-title">
+  <form id="dt-ai-config-form">
+    <header class="ai-config-h">
+      <div>
+        <p class="mono ai-config-kicker">// AI ASSIST</p>
+        <h2 id="ai-config-title">接入 AI 辅助</h2>
+      </div>
+      <button class="ai-config-x" id="ai-config-close" type="button" aria-label="关闭">×</button>
+    </header>
+    <p class="ai-config-lede">
+      填写一个实现 SegmentResponse 的 HTTP 接口；留空则回退到内置 mock / 后端。
+      保存后，本页「AI 辅助」的框选 / 点选请求直接使用该接口；整帧检测仍走检测后端。
+    </p>
+
+    <label class="ai-field">
+      <span>接口地址</span>
+      <input id="ai-endpoint" type="url" placeholder="https://your-ai.example.com/vision/segment" autocomplete="off" spellcheck="false">
+    </label>
+    <div class="ai-config-row">
+      <label class="ai-field">
+        <span>API Key</span>
+        <input id="ai-key" type="password" placeholder="Bearer token（可选）" autocomplete="off">
+      </label>
+      <label class="ai-field">
+        <span>模型名</span>
+        <input id="ai-model" type="text" placeholder="sam2.1-hiera-large" autocomplete="off" spellcheck="false">
+      </label>
+    </div>
+    <label class="ai-field ai-field-short">
+      <span>超时 / ms</span>
+      <input id="ai-timeout" type="number" min="1000" step="1000" value="30000" inputmode="numeric">
+    </label>
+
+    <details class="ai-contract">
+      <summary>请求 / 响应契约</summary>
+      <pre>POST &lt;接口地址&gt;
+Authorization: Bearer &lt;API Key&gt;
+Content-Type: application/json
+
+{
+  "model": "sam2.1-hiera-large",
+  "prompt": "ship",
+  "mode": "roi" | "point",
+  "image": { "data_url": "data:image/jpeg;base64,...",
+             "width": 2305, "height": 1537 },
+  "roi": [x0, y0, x1, y1] | null,
+  "point": [x, y] | null
+}
+
+→ 200
+{
+  "request_id": "req_...",
+  "model": { "name": "sam2.1-hiera-large" },
+  "candidates": [
+    { "polygon": [[x,y], ...], "quality": 0.82, "label": "ship" }
+  ]
+}</pre>
+      <a href="api/AI_ASSIST_API.md" target="_blank" rel="noopener">完整接口说明 →</a>
+    </details>
+
+    <p class="ai-config-note">
+      Key 只保存在本机 localStorage；生产环境建议由服务端代理，避免在浏览器暴露密钥。
+      跨域接口需允许本站 Origin，并返回 <b>Content-Type: application/json</b>。
+    </p>
+
+    <footer class="ai-config-actions">
+      <button class="ai-btn danger" id="ai-config-clear" type="button">清除接入</button>
+      <div class="spacer"></div>
+      <button class="ai-btn" id="ai-config-cancel" type="button">取消</button>
+      <button class="ai-btn primary" id="ai-config-save" type="button">保存并使用</button>
+    </footer>
+  </form>
+</dialog>
+
 <div class="toast-host" id="dt-toasts"></div>
 
 <script src="detect-config.js?v=2"></script>
 <script src="api/geom.js"></script>
 <script src="api/detect-mock.js?v=1"></script>
 <script src="api/detect-api.js?v=1"></script>
-<script src="detect.js?v=24"></script>
+<script src="detect.js?v=27"></script>
 <script src="motion.js?v=4"></script>
 </body>
 </html>

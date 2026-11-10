@@ -1756,3 +1756,185 @@ html, body { height: 100%; }
   box-shadow: inset 3px 0 0 var(--teal-bright);
 }
 .dt-batch-item.on { background: #123a4c; border-color: var(--teal); box-shadow: inset 3px 0 0 var(--teal-bright); }
+
+/* ============================================================================
+   AI ASSIST CONFIG — 使用者填写的自定义 AI 接口
+   ========================================================================== */
+
+.dt-ai-set {
+  border: 1px solid rgba(95, 243, 228, .32);
+  background: transparent;
+  color: var(--teal-bright);
+  font: 400 9px/1 var(--mono);
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  padding: 4px 7px;
+  cursor: pointer;
+  transition: background var(--t), color var(--t), border-color var(--t);
+}
+.dt-ai-set:hover {
+  background: var(--signal);
+  border-color: var(--signal);
+  color: #fff;
+}
+
+.ai-config {
+  width: min(620px, calc(100vw - 32px));
+  max-height: calc(100vh - 40px);
+  margin: auto;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--tx);
+}
+.ai-config::backdrop {
+  background: rgba(2, 10, 15, .78);
+}
+.ai-config form {
+  max-height: calc(100vh - 40px);
+  overflow: auto;
+  padding: clamp(20px, 3vw, 30px);
+  background: #0b1d27;
+  border: 1px solid var(--line-2);
+  border-top: 3px solid var(--signal);
+}
+.ai-config-h {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+  margin-bottom: 12px;
+}
+.ai-config-kicker {
+  margin: 0 0 8px;
+  color: var(--teal-bright);
+  font: 400 10px/1 var(--mono);
+  letter-spacing: .14em;
+}
+.ai-config h2 {
+  margin: 0;
+  color: #fff;
+  font: 600 clamp(24px, 3vw, 32px)/1.1 var(--sans);
+  letter-spacing: -.03em;
+}
+.ai-config-x {
+  width: 30px;
+  height: 30px;
+  flex: 0 0 30px;
+  border: 1px solid var(--line-2);
+  background: transparent;
+  color: var(--tx-2);
+  font: 300 22px/1 var(--sans);
+  cursor: pointer;
+}
+.ai-config-x:hover { border-color: var(--signal); color: #fff; }
+.ai-config-lede {
+  margin: 0 0 20px;
+  color: var(--tx-2);
+  font-size: 12.5px;
+  line-height: 1.7;
+}
+.ai-field {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin-bottom: 14px;
+}
+.ai-field span {
+  color: var(--teal-bright);
+  font: 400 10px/1 var(--mono);
+  letter-spacing: .12em;
+  text-transform: uppercase;
+}
+.ai-field input {
+  width: 100%;
+  padding: 10px 11px;
+  border: 1px solid var(--line-2);
+  background: #061119;
+  color: #fff;
+  font: 400 12px/1.35 var(--mono);
+  outline: none;
+}
+.ai-field input::placeholder { color: #5e7480; }
+.ai-field input:focus {
+  border-color: var(--signal);
+  box-shadow: inset 0 0 0 1px var(--signal);
+}
+.ai-field-short { max-width: 180px; }
+.ai-config-row {
+  display: grid;
+  grid-template-columns: 1.35fr 1fr;
+  gap: 14px;
+}
+.ai-contract {
+  margin: 4px 0 16px;
+  border: 1px solid var(--line);
+  background: rgba(4, 16, 23, .55);
+}
+.ai-contract summary {
+  padding: 9px 11px;
+  color: var(--tx-2);
+  font: 400 10px/1 var(--mono);
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+.ai-contract pre {
+  max-height: 220px;
+  overflow: auto;
+  margin: 0;
+  padding: 0 12px 10px;
+  color: #b7c7ce;
+  font: 400 10.5px/1.65 var(--mono);
+  white-space: pre-wrap;
+}
+.ai-contract a {
+  display: inline-block;
+  margin: 0 12px 12px;
+  color: var(--teal-bright);
+  font: 400 10px/1.4 var(--mono);
+  text-decoration: none;
+  border-bottom: 1px solid rgba(95, 243, 228, .4);
+}
+.ai-contract a:hover { color: #fff; border-color: #fff; }
+.ai-config-note {
+  margin: 0 0 18px;
+  color: var(--tx-3);
+  font: 400 10.5px/1.65 var(--mono);
+}
+.ai-config-note b { color: var(--tx-2); font-weight: 400; }
+.ai-config-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+.ai-btn {
+  padding: 9px 14px;
+  border: 1px solid var(--line-2);
+  background: transparent;
+  color: var(--tx);
+  font: 500 12px/1 var(--sans);
+  cursor: pointer;
+}
+.ai-btn:hover { border-color: var(--teal); color: #fff; }
+.ai-btn.primary {
+  border-color: var(--signal);
+  background: var(--signal);
+  color: #fff;
+}
+.ai-btn.primary:hover { background: var(--signal-deep); }
+.ai-btn.danger {
+  border-color: rgba(217, 45, 80, .5);
+  color: var(--danger-text);
+}
+.ai-btn.danger:hover { background: var(--danger); border-color: var(--danger); color: #fff; }
+
+@media (max-width: 560px) {
+  .ai-config-row { grid-template-columns: 1fr; gap: 0; }
+  .ai-field-short { max-width: none; }
+  .ai-config form { padding: 18px; }
+  .ai-config-actions { flex-wrap: wrap; }
+  .ai-config-actions .spacer { display: none; }
+}
