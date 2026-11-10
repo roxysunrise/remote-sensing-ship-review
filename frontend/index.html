@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
@@ -83,7 +83,7 @@
     </div>
 
     <div class="top-right">
-      <span class="badge demo" title="上传、任务进度与 AI 候选为前端模拟；坐标、几何与统计口径按真实契约实现">演示数据</span>
+      <span class="badge demo" title="任务进度与 AI 候选为前端模拟；坐标、几何与统计口径按真实契约实现">演示数据</span>
       <span class="who mono" id="ctx-user">—</span>
       <button class="btn ghost sm" id="btn-logout">退出</button>
     <span class="topbar-strip" aria-hidden="true"><i></i><i></i><i></i></span>
@@ -93,14 +93,13 @@
   <nav class="tabs" id="rail" aria-label="工作区">
     <span class="tab-ink" aria-hidden="true"></span>
     <button type="button" data-view="project"><i>01</i><span>项目</span></button>
-    <button type="button" data-view="upload"><i>02</i><span>上传</span></button>
-    <button type="button" data-view="task"><i>03</i><span>任务</span></button>
-    <button type="button" data-view="workbench"><i>04</i><span>工作台</span></button>
-    <a class="rail-link" href="detect.html" title="图片 / 视频检测、坐标查看与 AI 辅助框选"><i>05</i><span>智能检测</span></a>
-    <button type="button" data-view="review"><i>06</i><span>疑难复核</span></button>
-    <button type="button" data-view="stats"><i>07</i><span>区域统计</span></button>
-    <button type="button" data-view="history"><i>08</i><span>修订历史</span></button>
-    <button type="button" data-view="export"><i>09</i><span>报告导出</span></button>
+    <button type="button" data-view="task"><i>02</i><span>任务</span></button>
+    <button type="button" data-view="workbench"><i>03</i><span>工作台</span></button>
+    <a class="rail-link" href="detect.html" title="图片 / 视频检测、坐标查看与 AI 辅助框选"><i>04</i><span>智能检测</span></a>
+    <button type="button" data-view="review"><i>05</i><span>疑难复核</span></button>
+    <button type="button" data-view="stats"><i>06</i><span>区域统计</span></button>
+    <button type="button" data-view="history"><i>07</i><span>修订历史</span></button>
+    <button type="button" data-view="export"><i>08</i><span>报告导出</span></button>
     <span class="tabs-end mono">A 区 / 港口巡查</span>
   </nav>
 
@@ -142,7 +141,6 @@
                 前端隐藏按钮不能替代服务端校验。以下项目在真实实现中必须逐请求检查：
               </p>
               <div class="check done"><span class="box">✓</span><span>影像、预览瓦片、任务与结果读取</span></div>
-              <div class="check done"><span class="box">✓</span><span>上传会话的创建、续传、取消与完成</span></div>
               <div class="check done"><span class="box">✓</span><span>修订保存与版本切换</span></div>
               <div class="check done"><span class="box">✓</span><span>区域统计与报告下载</span></div>
               <div class="check"><span class="box">—</span><span>短期签名链接的即时撤权（需鉴权代理）</span></div>
@@ -172,82 +170,8 @@
             </div>
             <div class="card signal">
               <h3>下一步</h3>
-              <p class="muted" style="font-size:13px;margin:0 0 16px">上传就绪后创建检测任务，再进入工作台复核。</p>
-              <button class="btn primary sm" data-goto="upload">前往上传</button>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <!-- ---------- 上传 ---------- -->
-      <section class="view light" id="view-upload">
-        <div class="pad">
-          <div class="view-head">
-            <div class="vh-main">
-              <p class="kicker mono">// 02 — INGEST</p>
-              <h2>可靠上传</h2>
-            </div>
-            <div class="vh-side">
-              <p>传输完成 ≠ 可检测：分片传输、完整性校验、图像验证、预览生成是四个独立状态。</p>
-              <div class="vh-meta mono"><span>1 MiB / CHUNK</span><span>SHA-256</span><span>RESUMABLE</span></div>
-            </div>
-          </div>
-
-          <div class="grid-2" style="align-items:start">
-            <div class="card">
-              <h3>影像源</h3>
-              <div class="dropzone" id="dropzone">
-                <div class="big">拖入影像，或点击选择</div>
-                <div class="muted" style="font-size:13px">首版支持可解码的 RGB PNG / JPEG，保留原始文件</div>
-                <div style="margin-top:18px">
-                  <button class="btn sm" id="btn-pick-demo" type="button">使用示例影像 harbor.png</button>
-                </div>
-                <input type="file" id="file-input" accept=".png,.jpg,.jpeg" class="hidden">
-              </div>
-
-              <div class="row" style="margin-top:14px">
-                <button class="btn sm" id="btn-pause" disabled>暂停传输</button>
-                <button class="btn sm" id="btn-abort" disabled>模拟网络中断</button>
-                <div class="spacer"></div>
-                <span class="muted" id="upload-meta" style="font-size:11.5px"></span>
-              </div>
-
-              <div style="margin-top:12px">
-                <div class="bar"><i id="upload-bar"></i></div>
-                <div class="row" style="margin-top:8px">
-                  <span class="mono" id="upload-pct" style="font-size:11.5px;color:var(--tx-2)">0%</span>
-                  <span class="spacer"></span>
-                  <span class="mono" id="upload-chunk" style="font-size:11.5px;color:var(--tx-3)"></span>
-                </div>
-              </div>
-
-              <div class="steps" id="upload-steps"></div>
-
-              <div class="row" style="margin-top:16px">
-                <button class="btn primary" id="btn-create-task" disabled>创建检测任务</button>
-                <span class="muted" id="upload-block" style="font-size:12px">未就绪影像不能创建检测任务</span>
-              </div>
-            </div>
-
-            <div class="card">
-              <h3>上传状态机</h3>
-              <pre class="mono" style="font-size:11.5px;color:var(--tx-2);line-height:1.75;margin:0;white-space:pre-wrap">
-传输中 ──100%──▶ 合并校验 ──▶ 图像验证 ──▶ 预览生成 ──▶ 可分析
-   ▲                │            │            │
-   └── 续传 ────────┘            │            │
-                       校验失败 ✗ │   解码失败 ✗ │
-                                  ▼            ▼
-                              不可检测（需重新上传）</pre>
-              <div class="hr"></div>
-              <h3>必做约束</h3>
-              <div class="check done"><span class="box">✓</span><span>以服务端已接收分片为准，重复提交不追加字节</span></div>
-              <div class="check done"><span class="box">✓</span><span>核对预期长度 + 最终文件校验和</span></div>
-              <div class="check done"><span class="box">✓</span><span>校验扩展名、文件签名与实际解码结果</span></div>
-              <div class="check done"><span class="box">✓</span><span>限定文件大小、解码后像素与并发</span></div>
-              <div class="check"><span class="box">○</span><span>刷新后需重新关联原文件才能续传</span></div>
-              <div class="note warn" style="margin-top:12px">
-                浏览器无法在刷新后自动重新读取本地文件，续传必须由用户重新选择同一文件再恢复。
-              </div>
+              <p class="muted" style="font-size:13px;margin:0 0 16px">影像统一在「智能检测」接入；演示模式已内置 harbor.png，可直接创建任务。</p>
+              <a class="btn primary sm" href="detect.html">前往智能检测</a>
             </div>
           </div>
         </div>
@@ -258,7 +182,7 @@
         <div class="pad">
           <div class="view-head">
             <div class="vh-main">
-              <p class="kicker mono">// 03 — DETECTION</p>
+              <p class="kicker mono">// 02 — DETECTION</p>
               <h2>检测任务</h2>
             </div>
             <div class="vh-side">
@@ -389,7 +313,7 @@
         <div class="pad">
           <div class="view-head">
             <div class="vh-main">
-              <p class="kicker mono">// 06 — REVIEW QUEUE</p>
+              <p class="kicker mono">// 05 — REVIEW QUEUE</p>
               <h2>疑难复核</h2>
             </div>
             <div class="vh-side">
@@ -482,7 +406,7 @@
         <div class="pad">
           <div class="view-head">
             <div class="vh-main">
-              <p class="kicker mono">// 08 — VERSIONS</p>
+              <p class="kicker mono">// 07 — VERSIONS</p>
               <h2>修订历史</h2>
             </div>
             <div class="vh-side">
@@ -518,7 +442,7 @@
         <div class="pad">
           <div class="view-head">
             <div class="vh-main">
-              <p class="kicker mono">// 09 — EXPORT</p>
+              <p class="kicker mono">// 08 — EXPORT</p>
               <h2>报告导出</h2>
             </div>
             <div class="vh-side">
@@ -579,7 +503,7 @@
 <script src="api/geom.js"></script>
 <script src="api/mock-backend.js"></script>
 <script src="api/client.js"></script>
-<script src="app.js?v=11"></script>
+<script src="app.js?v=12"></script>
 <script src="motion.js?v=4"></script>
 </body>
 </html>

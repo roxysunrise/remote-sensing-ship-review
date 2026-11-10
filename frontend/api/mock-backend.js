@@ -55,6 +55,14 @@
       seq: { upload: 0, image: 0, task: 0, version: 0, candidate: 0, export: 0, detection: 0 }
     };
 
+    // 上传入口已统一到「智能检测」；主工作台的演示任务直接使用内置 harbor.png。
+    db.images['img-demo'] = {
+      id: 'img-demo', project_id: 'harbor-a', file_name: 'harbor.png', status: 'ready',
+      sha256: SCENE.image.sha256, width: SCENE.image.width, height: SCENE.image.height,
+      mode: 'RGB', bytes: null, file_url: 'assets/harbor.png', preview_url: 'assets/harbor.png',
+      created_at: new Date().toISOString()
+    };
+
     let session = null;   // {userId, projectId, token}
     const timers = new Map();
 

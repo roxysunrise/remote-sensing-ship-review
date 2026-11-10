@@ -56,7 +56,6 @@ const state = {
   showTiles: false,
   showLabels: true,
 
-  upload: { status: 'idle', pct: 0, received: 0, total: 24, stage: '', name: '', id: null, error: null, file: null },
   ai: { status: 'idle' },
   exportJob: null,
 
@@ -712,178 +711,18 @@ function renderDetail() {
   $('#btn-locate').onclick = () => centerOn(d.id);
 }
 
-/* --------------------------------------------------------------------- upload */
-
-const UPLOAD_STEPS = [
-  { id: 'transport', label: '分片传输', note: '按 1 MiB 分片上传，可暂停与续传' },
-  { id: 'merge', label: '合并与完整性校验', note: '核对预期长度与最终校验和' },
-  { id: 'inspect', label: '图像验证', note: '真实解码、格式签名、像素上限、EXIF' },
-  { id: 'preview', label: '生成预览', note: '生成缩略图与瓦片，进入可分析状态' }
-];
-
-function renderUpload() {
-  const u = state.upload;
-  const idx = UPLOAD_STEPS.findIndex(s => s.id === u.stage);
-  $('#upload-steps').innerHTML = UPLOAD_STEPS.map((s, i) => {
-    let cls = '';
-    if (u.status === 'ready' || (idx >= 0 && i < idx)) cls = 'done';
-    else if (idx === i) cls = 'active';
-    return `<div class="step ${cls}">
-      <div class="bullet">${cls === 'done' ? '✓' : i + 1}</div>
-      <div class="txt">${s.label}<small>${s.note}</small></div>
-    </div>`;
-  }).join('');
-
-  $('#upload-bar').style.width = u.pct + '%';
-  $('#upload-pct').textContent = Math.round(u.pct) + '%';
-  $('#upload-chunk').textContent = u.total ? `分片 ${u.received}/${u.total}` : '';
-  $('#upload-meta').textContent = u.status === 'ready'
-    ? `${state.image ? state.image.file_name : 'harbor.png'} · ${IMG_W}×${IMG_H} · RGB`
-    : (u.name || '');
-
-  $('#btn-pause').disabled = !(u.status === 'transport' || u.status === 'paused');
-  $('#btn-abort').disabled = !(u.status === 'transport' || u.status === 'paused');
-  $('#btn-pause').textContent = u.status === 'paused' ? '继续传输' : '暂停传输';
-  $('#btn-create-task').disabled = !(state.image && state.image.status === 'ready' && !state.task);
-  $('#upload-block').textContent = state.image
-    ? (state.task ? '已创建检测任务，可进入任务页' : '影像已通过验证，可以创建检测任务')
-    : '未就绪影像不能创建检测任务';
-}
-
-function resetUpload() {
-  state.upload = { status: 'idle', pct: 0, received: 0, total: 24, stage: '', name: '', id: null, error: null, file: null };
-  renderUpload();
-}
-
-async function startUpload(name, file) {
-  const u = state.upload;
-  if (u.status === 'transport' || u.status === 'verifying') return;
-
-  await action(async () => {
-    const created = await API.createUpload(state.project.id, { file_name: name, size: file ? file.size : null });
-    Object.assign(u, {
-      id: created.id, status: 'transport', stage: 'transport',
-      received: created.chunks_received, total: created.chunks_total,
-      pct: created.pct, name, file: file || null, error: null
-    });
-    renderUpload();
-    await runChunks();
-  });
-}
-
-async function runChunks() {
-  const u = state.upload;
-  const size = CFG.chunkSize || 1048576;
-  while (u.received < u.total) {
-    if (u.status === 'paused') return;
-    const index = u.received;
-    const bytes = u.file
-      ? u.file.slice(index * size, (index + 1) * size)
-      : new Uint8Array(Math.min(size, 1024));
-    try {
-      const r = await API.putChunk(u.id, index, bytes);
-      u.received = r.chunks_received;
-      u.pct = r.pct;
-      renderUpload();
-    } catch (err) {
-      u.status = 'failed';
-      u.error = err.code;
-      renderUpload();
-      toastError(err);
-      return;
-    }
-  }
-  await finishUpload();
-}
-
-/** 真实文件用 WebCrypto 计算整体校验和；演示影像直接使用已知哈希 */
-async function sha256OfFile(file) {
-  if (!file) return SCENE.image.sha256;
-  if (!globalThis.crypto || !crypto.subtle) return null;
-  const digest = await crypto.subtle.digest('SHA-256', await file.arrayBuffer());
-  return [...new Uint8Array(digest)].map(b => b.toString(16).padStart(2, '0')).join('');
-}
-
-async function finishUpload() {
-  const u = state.upload;
-  u.status = 'verifying';
-  u.stage = 'merge';
-  renderUpload();
-  await action(async () => {
-    const sha256 = await sha256OfFile(u.file);
-    await API.completeUpload(u.id, { sha256, size: u.file ? u.file.size : null });
-    await pollUpload(u.id);
-  });
-}
-
-async function pollUpload(uploadId) {
-  const u = state.upload;
-  for (let i = 0; i < 120; i++) {
-    const snap = await API.getUpload(uploadId);
-    u.stage = snap.stage;
-    u.status = snap.status === 'verifying' ? 'verifying' : snap.status;
-    renderUpload();
-    if (snap.status === 'ready') {
-      state.image = await API.getImage(snap.image_id);
-      u.status = 'ready';
-      u.stage = 'ready';
-      u.pct = 100;
-      renderUpload();
-      renderProject();
-      toast('影像已通过验证，可以创建检测任务', 'ok');
-      return;
-    }
-    if (snap.status === 'failed') {
-      toast('上传校验失败：' + (snap.error || '未知原因'), 'err');
-      renderUpload();
-      return;
-    }
-    await sleep(CFG.pollIntervalMs || 250);
-  }
-}
-
-function bindUpload() {
-  $('#btn-pick-demo').onclick = () => { resetUpload(); startUpload('harbor.png', null); };
-  $('#dropzone').onclick = ev => {
-    if (ev.target.id !== 'btn-pick-demo') $('#file-input').click();
-  };
-  $('#file-input').onchange = ev => {
-    const f = ev.target.files[0];
-    if (f) { resetUpload(); startUpload(f.name, f); }
-  };
-  const dz = $('#dropzone');
-  ['dragenter', 'dragover'].forEach(t => dz.addEventListener(t, e => { e.preventDefault(); dz.classList.add('hot'); }));
-  ['dragleave', 'drop'].forEach(t => dz.addEventListener(t, e => { e.preventDefault(); dz.classList.remove('hot'); }));
-  dz.addEventListener('drop', e => {
-    const f = e.dataTransfer.files[0];
-    if (f) { resetUpload(); startUpload(f.name, f); }
-  });
-  $('#btn-pause').onclick = () => {
-    const u = state.upload;
-    if (u.status === 'transport') {
-      u.status = 'paused';
-      toast('传输已暂停，服务端已保留分片进度');
-    } else if (u.status === 'paused') {
-      u.status = 'transport';
-      renderUpload();
-      toast(`已从第 ${u.received + 1} 个分片继续`);
-      action(runChunks);
-      return;
-    }
-    renderUpload();
-  };
-  $('#btn-abort').onclick = () => {
-    state.upload.status = 'paused';
-    toast('网络中断，已保留服务端分片进度', 'err');
-    renderUpload();
-  };
-  $('#btn-create-task').onclick = () => createTask();
-}
-
 /* ----------------------------------------------------------------------- task */
 
+/* 上传入口已统一到「智能检测」；mock 演示直接使用内置 harbor.png。 */
+async function hydrateDemoImage() {
+  if (API.mode !== 'mock' || state.image) return;
+  try {
+    state.image = await API.getImage('img-demo');
+  } catch (_) { /* 演示影像尚未注册时保持空状态 */ }
+}
+
 async function createTask() {
-  if (!state.image) return toast('请先上传影像', 'err');
+  if (!state.image) return toast('请先在「智能检测」接入影像', 'err');
   if (state.task && ['running', 'merging'].includes(state.task.status))
     return toast('任务正在运行，请等待完成或取消', 'err');
   await action(async () => {
@@ -1233,7 +1072,7 @@ async function doExport() {
 /* ------------------------------------------------------------------------ AI */
 
 async function aiRequest(world) {
-  if (!state.image) return toast('请先上传影像', 'err');
+  if (!state.image) return toast('请先在「智能检测」接入影像', 'err');
   state.ai = { status: 'requesting' };
   WB.vp.draw();
   try {
@@ -1365,7 +1204,6 @@ function switchView(name) {
       renderStats();
     });
   } else if (name === 'project') renderProject();
-  else if (name === 'upload') renderUpload();
   else if (name === 'task') renderTask();
   else if (name === 'review') renderReview();
   else if (name === 'history') renderHistory();
@@ -1414,9 +1252,9 @@ async function restoreSession() {
   $('#ctx-project').textContent = pj.name || pj.id || '—';
   $('#login').classList.add('hidden');
   $('#app').classList.remove('hidden');
+  await hydrateDemoImage();
   switchView('project');
   renderProject();
-  renderUpload();
   renderTask();
   renderExport();
   return true;
@@ -1446,9 +1284,9 @@ async function doLogin(username, password, projectId) {
     $('#ctx-project').textContent = state.user.project.name;
     $('#login').classList.add('hidden');
     $('#app').classList.remove('hidden');
+    await hydrateDemoImage();
     switchView('project');
     renderProject();
-    renderUpload();
     renderTask();
     renderExport();
     toast(`已登录：${state.user.name}（${state.user.role}）`, 'ok');
@@ -1464,7 +1302,6 @@ async function doLogout(silent) {
   state.draft = [];
   state.versions = [];
   state.image = null;
-  resetUpload();
 
   // 真实后端模式：退出后回到独立登录页；mock 模式留在本页显示登录门。
   if (API.mode === 'http' && window.AuthSession) {
@@ -1531,9 +1368,7 @@ function bindGlobal() {
 
 async function boot() {
   bindGlobal();
-  bindUpload();
   bindTask();
-  renderUpload();
   renderTask();
   renderExport();
   const mode = API.mode === 'mock' ? 'mock（浏览器内模拟）' : API.baseUrl;
